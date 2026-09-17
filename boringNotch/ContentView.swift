@@ -69,7 +69,11 @@ struct ContentView: View {
             && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle)
             && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
         {
-            chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
+            if Defaults[.minimalLyricsMode] {
+                chinWidth = max(380, vm.closedNotchSize.width + 120)
+            } else {
+                chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
+            }
         } else if !coordinator.expandingView.show && vm.notchState == .closed
             && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace]
             && !vm.hideOnClosed
@@ -183,17 +187,20 @@ struct ContentView: View {
                     }
                     .sensoryFeedback(.alignment, trigger: haptics)
                     .contextMenu {
+                        Toggle(
+                            "Minimal Lyrics Mode",
+                            isOn: Binding(
+                                get: { Defaults[.minimalLyricsMode] },
+                                set: { Defaults[.minimalLyricsMode] = $0 }
+                            )
+                        )
+                        Divider()
                         Button("Settings") {
                             DispatchQueue.main.async {
                                 SettingsWindowController.shared.showWindow()
                             }
                         }
                         .keyboardShortcut(KeyEquivalent(","), modifiers: .command)
-                        //                    Button("Edit") { // Doesnt work....
-                        //                        let dn = DynamicNotch(content: EditPanelView())
-                        //                        dn.toggle()
-                        //                    }
-                        //                    .keyboardShortcut("E", modifiers: .command)
                     }
                 if vm.chinHeight > 0 {
                     Rectangle()
@@ -288,8 +295,13 @@ struct ContentView: View {
                           InlineHUD(type: $coordinator.sneakPeek.type, value: $coordinator.sneakPeek.value, icon: $coordinator.sneakPeek.icon, hoverAnimation: $isHovering, gestureProgress: $gestureProgress)
                               .transition(.opacity)
                       } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music) && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed {
-                          MusicLiveActivity()
-                              .frame(alignment: .center)
+                          if Defaults[.minimalLyricsMode] {
+                              MinimalLyricsView()
+                                  .frame(alignment: .center)
+                          } else {
+                              MusicLiveActivity()
+                                  .frame(alignment: .center)
+                          }
                       } else if !coordinator.expandingView.show && vm.notchState == .closed && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace] && !vm.hideOnClosed  {
                           BoringFaceAnimation()
                        } else if vm.notchState == .open {
@@ -525,7 +537,9 @@ struct ContentView: View {
             
             guard vm.notchState == .closed,
                   !coordinator.sneakPeek.show,
-                  Defaults[.openNotchOnHover] else { return }
+                  Defaults[.openNotchOnHover],
+                  !(Defaults[.minimalLyricsMode] && (musicManager.isPlaying || !musicManager.isPlayerIdle))
+            else { return }
             
             hoverTask = Task {
                 try? await Task.sleep(for: .seconds(Defaults[.minimumHoverDuration]))

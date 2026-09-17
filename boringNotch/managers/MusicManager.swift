@@ -77,6 +77,16 @@ class MusicManager: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Observe changes to minimal lyrics mode to fetch lyrics immediately if turned on
+        Defaults.publisher(.minimalLyricsMode)
+            .sink { [weak self] change in
+                guard let self = self, change.newValue else { return }
+                if (self.isPlaying || !self.isPlayerIdle) && self.currentLyrics.isEmpty && !self.songTitle.isEmpty {
+                    self.fetchLyricsIfAvailable(bundleIdentifier: self.bundleIdentifier, title: self.songTitle, artist: self.artistName)
+                }
+            }
+            .store(in: &cancellables)
+
         // Initialize deprecation check asynchronously
         Task { @MainActor in
             do {
@@ -342,7 +352,7 @@ class MusicManager: ObservableObject {
 
     // MARK: - Lyrics
     private func fetchLyricsIfAvailable(bundleIdentifier: String?, title: String, artist: String) {
-        guard Defaults[.enableLyrics], !title.isEmpty else {
+        guard (Defaults[.enableLyrics] || Defaults[.minimalLyricsMode]), !title.isEmpty else {
             DispatchQueue.main.async {
                 self.isFetchingLyrics = false
                 self.currentLyrics = ""

@@ -600,6 +600,7 @@ struct Media: View {
     @Default(.sneakPeekStyles) var sneakPeekStyles
 
     @Default(.enableLyrics) var enableLyrics
+    @Default(.minimalLyricsMode) var minimalLyricsMode
 
     var body: some View {
         Form {
@@ -644,6 +645,12 @@ struct Media: View {
                     "Show music live activity",
                     isOn: $coordinator.musicLiveActivityEnabled.animation()
                 )
+                Defaults.Toggle(key: .minimalLyricsMode) {
+                    HStack {
+                        Text("Minimal lyrics mode")
+                        customBadge(text: "New")
+                    }
+                }
                 Toggle("Show sneak peek on playback changes", isOn: $enableSneakPeek)
                 Picker("Sneak Peek Style", selection: $sneakPeekStyles) {
                     ForEach(SneakPeekStyle.allCases) { style in

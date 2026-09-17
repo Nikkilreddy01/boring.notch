@@ -1,0 +1,60 @@
+name: Build boringNotch App
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Release App
+    runs-on: macos-15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          if [ -d "/Applications/Xcode_16.4.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.4.app
+          elif [ -d "/Applications/Xcode_16.2.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.2.app
+          elif [ -d "/Applications/Xcode_16.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.app
+          fi
+          xcodebuild -version
+
+      - name: Resolve Package Dependencies
+        run: |
+          xcodebuild \
+            -project boringNotch.xcodeproj \
+            -scheme boringNotch \
+            -clonedSourcePackagesDirPath "${{ runner.temp }}/packages" \
+            -resolvePackageDependencies
+
+      - name: Build Application
+        run: |
+          xcodebuild \
+            -project boringNotch.xcodeproj \
+            -scheme boringNotch \
+            -configuration Release \
+            -destination "platform=macOS" \
+            -derivedDataPath "${{ runner.temp }}/derived-data" \
+            -clonedSourcePackagesDirPath "${{ runner.temp }}/packages" \
+            -onlyUsePackageVersionsFromResolvedFile \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+      - name: Archive App Bundle
+        run: |
+          cd "${{ runner.temp }}/derived-data/Build/Products/Release"
+          ditto -c -k --sequesterRsrc --keepParent "boringNotch.app" "$GITHUB_WORKSPACE/boringNotch.zip"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: boringNotch-release
+          path: boringNotch.zip
