@@ -37,6 +37,10 @@ struct ContentView: View {
 
     @Default(.showNotHumanFace) var showNotHumanFace
 
+    private var isMinimalLyricsActive: Bool {
+        Defaults[.minimalLyricsMode] && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
+    }
+
     // Shared interactive spring for movement/resizing to avoid conflicting animations
     private let animationSpring = Animation.interactiveSpring(response: 0.38, dampingFraction: 0.8, blendDuration: 0)
 
@@ -70,7 +74,7 @@ struct ContentView: View {
             && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
         {
             if Defaults[.minimalLyricsMode] {
-                chinWidth = max(380, vm.closedNotchSize.width + 120)
+                chinWidth = 390
             } else {
                 chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
             }
@@ -101,21 +105,24 @@ struct ContentView: View {
                         vm.notchState == .open
                         ? Defaults[.cornerRadiusScaling]
                         ? (cornerRadiusInsets.opened.top) : (cornerRadiusInsets.opened.bottom)
-                        : cornerRadiusInsets.closed.bottom
+                        : (isMinimalLyricsActive ? 0 : cornerRadiusInsets.closed.bottom)
                     )
                     .padding([.horizontal, .bottom], vm.notchState == .open ? 12 : 0)
-                    .background(.black)
-                    .clipShape(currentNotchShape)
-                    .overlay(alignment: .top) {
-                        Rectangle()
-                            .fill(.black)
-                            .frame(height: 1)
-                            .padding(.horizontal, topCornerRadius)
+                    .conditionalModifier(!isMinimalLyricsActive) { view in
+                        view
+                            .background(.black)
+                            .clipShape(currentNotchShape)
+                            .overlay(alignment: .top) {
+                                Rectangle()
+                                    .fill(.black)
+                                    .frame(height: 1)
+                                    .padding(.horizontal, topCornerRadius)
+                            }
+                            .shadow(
+                                color: ((vm.notchState == .open || isHovering) && Defaults[.enableShadow])
+                                    ? .black.opacity(0.7) : .clear, radius: Defaults[.cornerRadiusScaling] ? 6 : 4
+                            )
                     }
-                    .shadow(
-                        color: ((vm.notchState == .open || isHovering) && Defaults[.enableShadow])
-                            ? .black.opacity(0.7) : .clear, radius: Defaults[.cornerRadiusScaling] ? 6 : 4
-                    )
                     .padding(
                         .bottom,
                         vm.effectiveClosedNotchHeight == 0 ? 10 : 0
@@ -538,7 +545,7 @@ struct ContentView: View {
             guard vm.notchState == .closed,
                   !coordinator.sneakPeek.show,
                   Defaults[.openNotchOnHover],
-                  !(Defaults[.minimalLyricsMode] && (musicManager.isPlaying || !musicManager.isPlayerIdle))
+                  !isMinimalLyricsActive
             else { return }
             
             hoverTask = Task {
