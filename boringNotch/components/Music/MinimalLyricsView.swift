@@ -18,13 +18,12 @@ struct MinimalLyricsView: View {
     @State private var isTimedOut: Bool = false
     @State private var pauseInactivityTask: Task<Void, Never>?
 
-    @State private var isPointerInside = false
     @State private var dragOffset: CGFloat = 0
     @State private var isDismissed = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isConversationActive: Bool {
-        Defaults[.conversationModeEnabled] && (conversationManager.state.isConversing || !captionManager.currentAIText.isEmpty || !captionManager.currentUserText.isEmpty)
+        Defaults[.conversationModeEnabled] && conversationManager.isSessionActive
     }
 
     private var isMusicActive: Bool {
@@ -32,12 +31,13 @@ struct MinimalLyricsView: View {
     }
 
     private var isVisible: Bool {
+        if isDismissed { return false }
         if isConversationActive { return true }
-        return isExpanded && !isTimedOut && !isDismissed
+        return isExpanded && !isTimedOut
     }
 
     private var motion: Animation {
-        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.48, dampingFraction: 0.82)
+        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.44, dampingFraction: 0.84)
     }
 
     private let targetWidth: CGFloat = 390
@@ -89,7 +89,7 @@ struct MinimalLyricsView: View {
         let cornerRadius: CGFloat = isLongCurrent ? 20 : 23
 
         VStack(alignment: .center, spacing: 0) {
-            // 1. Untouched Physical Camera Notch Area (Standard Black Mask)
+            // 1. Untouched Physical Camera Notch Area (Standard Black Mask with Interactive Wings)
             if notchHeight > 0 {
                 ZStack {
                     NotchShape(
@@ -101,23 +101,61 @@ struct MinimalLyricsView: View {
 
                     // Wings outside the camera
                     HStack {
-                        if musicManager.isPlaying {
-                            Image(nsImage: musicManager.albumArt)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 14, height: 14)
-                                .clipShape(Circle())
-                                .padding(.leading, 8)
+                        // Left Wing: Music artwork (tap to reveal or toggle lyrics bar!)
+                        Button(action: {
+                            withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) {
+                                isDismissed.toggle()
+                            }
+                        }) {
+                            HStack(spacing: 4) {
+                                if musicManager.isPlaying {
+                                    Image(nsImage: musicManager.albumArt)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: 16, height: 16)
+                                        .clipShape(Circle())
+                                }
+                            }
+                            .padding(.leading, 8)
                         }
+                        .buttonStyle(.plain)
+                        .help(isDismissed ? "Show Lyrics Bar" : "Hide Lyrics Bar")
+
                         Spacer()
-                        if Defaults[.conversationModeEnabled] {
-                            Image(systemName: conversationManager.state.systemIcon)
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(conversationManager.isSessionActive ? .cyan : .gray)
-                                .padding(.trailing, 8)
+
+                        // Right Wing: Dedicated Conversation Mic Button!
+                        Button(action: {
+                            conversationManager.toggleConversationMode()
+                            if isDismissed {
+                                withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) {
+                                    isDismissed = false
+                                }
+                            }
+                        }) {
+                            HStack(spacing: 3) {
+                                Image(systemName: conversationManager.isSessionActive ? "mic.fill" : "mic")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(conversationManager.isSessionActive ? .cyan : .white.opacity(0.8))
+                            }
+                            .frame(width: 22, height: 20)
+                            .background(
+                                Capsule()
+                                    .fill(conversationManager.isSessionActive ? Color.cyan.opacity(0.25) : Color.white.opacity(0.12))
+                            )
+                            .padding(.trailing, 8)
                         }
+                        .buttonStyle(.plain)
+                        .help(conversationManager.isSessionActive ? "Stop Conversation (⌥ Space)" : "Start Conversation (⌥ Space)")
                     }
                     .frame(width: vm.closedNotchSize.width, height: notchHeight)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if isDismissed {
+                        withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) {
+                            isDismissed = false
+                        }
+                    }
                 }
                 .zIndex(1)
             }
@@ -126,7 +164,7 @@ struct MinimalLyricsView: View {
             Color.clear
                 .frame(width: targetWidth, height: (notchHeight > 0 ? 8 : 12))
 
-            // 3. Separate Floating Liquid Glass Bar Below the Notch (Unobstructed by camera!)
+            // 3. Separate Floating Liquid Glass Bar Below the Notch
             ZStack {
                 if isConversationActive {
                     // CONVERSATION VIEW (Active Voice Partner)
@@ -162,26 +200,25 @@ struct MinimalLyricsView: View {
             )
             .shadow(color: Color.black.opacity(0.28), radius: 14, x: 0, y: 7)
             .shadow(color: Color.black.opacity(0.15), radius: 3, x: 0, y: 1)
-            .scaleEffect(x: isVisible || reduceMotion ? 1 : 0.28, y: isVisible || reduceMotion ? 1 : 0.08, anchor: .top)
-            .offset(y: reduceMotion ? 0 : (isVisible ? dragOffset : -(notchHeight > 0 ? 24 : 12)))
-            .opacity(isVisible && !isPointerInside ? 1 : 0)
+            .scaleEffect(x: isVisible || reduceMotion ? 1 : 0.35, y: isVisible || reduceMotion ? 1 : 0.1, anchor: .top)
+            .offset(y: reduceMotion ? 0 : (isVisible ? dragOffset : -(notchHeight > 0 ? 28 : 16)))
+            .opacity(isVisible ? 1 : 0)
             .animation(motion, value: isVisible)
             .animation(.easeInOut(duration: 0.2), value: isConversationActive)
-            .animation(.easeInOut(duration: 0.18), value: isPointerInside)
-            .background {
-                LyricsPointerRegion(visible: isVisible, onHover: { isPointerInside = $0 })
-            }
             .gesture(
-                DragGesture(minimumDistance: 8, coordinateSpace: .global)
+                DragGesture(minimumDistance: 4, coordinateSpace: .local)
                     .onChanged { value in
                         if value.translation.height < 0 {
-                            dragOffset = value.translation.height * 0.4
+                            // Dragging upwards toward notch
+                            dragOffset = value.translation.height * 0.75
                         }
                     }
                     .onEnded { value in
-                        if value.translation.height < -14 || value.predictedEndTranslation.height < -25 {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        if value.translation.height < -12 || value.predictedEndTranslation.height < -20 {
+                            // Pushed up into notch -> close/dock!
+                            withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) {
                                 isDismissed = true
+                                dragOffset = 0
                             }
                         } else {
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
@@ -199,6 +236,22 @@ struct MinimalLyricsView: View {
         }
         .onChange(of: musicManager.isPlaying) { _, playing in
             handlePlaybackChange(isPlaying: playing)
+        }
+        .onChange(of: musicManager.songTitle) { _, _ in
+            // When song changes, reveal lyrics automatically
+            if isDismissed {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                    isDismissed = false
+                }
+            }
+        }
+        .onChange(of: conversationManager.isSessionActive) { _, active in
+            // When conversation mode is started, reveal bar automatically
+            if active && isDismissed {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                    isDismissed = false
+                }
+            }
         }
     }
 
@@ -263,9 +316,14 @@ struct MinimalLyricsView: View {
                 }
                 .transition(.opacity)
             } else {
-                Text(conversationManager.state.statusDescription)
-                    .font(.system(size: 11.5, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.75))
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Color.cyan)
+                        .frame(width: 6, height: 6)
+                    Text("Listening… Speak in English")
+                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.85))
+                }
             }
         }
         .animation(.smooth(duration: 0.2), value: captionManager.currentAIText)
@@ -412,95 +470,5 @@ struct MinimalLyricsView: View {
         }
         .animation(.spring(response: 0.42, dampingFraction: 0.85), value: lyricIndex)
         .clipped()
-    }
-}
-
-private struct LyricsPointerRegion: NSViewRepresentable {
-    var visible: Bool
-    var onHover: (Bool) -> Void
-
-    func makeNSView(context: Context) -> RegionView { RegionView() }
-
-    func updateNSView(_ view: RegionView, context: Context) {
-        view.visible = visible
-        view.onHover = onHover
-    }
-
-    static func dismantleNSView(_ view: RegionView, coordinator: ()) { view.stop() }
-
-    final class RegionView: NSView {
-        var visible = false
-        var onHover: ((Bool) -> Void)?
-        private var timer: Timer?
-        private var enteredAt: Date?
-        private var revealed = false
-        private var isCapturingDrag = false
-        private weak var passthroughWindow: NSWindow?
-
-        private let passthroughDelay: TimeInterval = 0.6
-        private let grabZoneHeight: CGFloat = 10
-
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            stop()
-            guard window != nil else { return }
-            timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.updatePointer() }
-            RunLoop.main.add(timer!, forMode: .common)
-        }
-
-        func stop() {
-            timer?.invalidate()
-            timer = nil
-            enteredAt = nil
-            revealed = false
-            isCapturingDrag = false
-            onHover?(false)
-            passthroughWindow?.ignoresMouseEvents = false
-            passthroughWindow = nil
-        }
-
-        private func updatePointer() {
-            guard let window else { return }
-            let rect = window.convertToScreen(convert(bounds, to: nil))
-            let pointer = NSEvent.mouseLocation
-            let inside = visible && rect.contains(pointer)
-            let inGrabZone = inside && pointer.y >= rect.maxY - grabZoneHeight
-            let primaryButtonDown = NSEvent.pressedMouseButtons & 1 != 0
-
-            if !inside {
-                enteredAt = nil
-                isCapturingDrag = false
-            } else if enteredAt == nil {
-                enteredAt = Date()
-            }
-
-            if inGrabZone && primaryButtonDown {
-                isCapturingDrag = true
-            } else if !primaryButtonDown {
-                isCapturingDrag = false
-            }
-
-            let hoverDuration = Date().timeIntervalSince(enteredAt ?? Date())
-            let shouldReveal = inside
-            let shouldPassThrough = inside
-                && hoverDuration >= passthroughDelay
-                && !inGrabZone
-                && !isCapturingDrag
-
-            if revealed != shouldReveal {
-                revealed = shouldReveal
-                onHover?(revealed)
-            }
-
-            if shouldPassThrough {
-                passthroughWindow = window
-                window.ignoresMouseEvents = true
-            } else if let previous = passthroughWindow {
-                previous.ignoresMouseEvents = false
-                passthroughWindow = nil
-            }
-        }
     }
 }

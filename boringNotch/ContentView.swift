@@ -40,7 +40,7 @@ struct ContentView: View {
     private var isFloatingBarActive: Bool {
         vm.notchState == .closed && !vm.hideOnClosed && (
             (Defaults[.minimalLyricsMode] && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled) ||
-            (Defaults[.conversationModeEnabled] && (ConversationManager.shared.state.isConversing || !CaptionManager.shared.currentAIText.isEmpty || !CaptionManager.shared.currentUserText.isEmpty))
+            (Defaults[.conversationModeEnabled] && ConversationManager.shared.isSessionActive)
         )
     }
 
@@ -203,21 +203,14 @@ struct ContentView: View {
                     }
                     .sensoryFeedback(.alignment, trigger: haptics)
                     .contextMenu {
-                        Toggle(
-                            "Conversation Mode",
-                            isOn: Binding(
-                                get: { Defaults[.conversationModeEnabled] },
-                                set: { enabled in
-                                    if enabled {
-                                        Task { @MainActor in
-                                            await ConversationManager.shared.startConversation()
-                                        }
-                                    } else {
-                                        ConversationManager.shared.stopConversation()
-                                    }
-                                }
+                        Button(action: {
+                            ConversationManager.shared.toggleConversationMode()
+                        }) {
+                            Label(
+                                ConversationManager.shared.isSessionActive ? "Stop Conversation (⌥ Space)" : "Start Conversation (⌥ Space)",
+                                systemImage: ConversationManager.shared.isSessionActive ? "mic.slash" : "mic"
                             )
-                        )
+                        }
                         Toggle(
                             "Minimal Lyrics Mode",
                             isOn: Binding(
@@ -233,7 +226,7 @@ struct ContentView: View {
                         }
                         .keyboardShortcut(KeyEquivalent(","), modifiers: .command)
                     }
-                if vm.chinHeight > 0 && !isMinimalLyricsActive && !(isConversationActiveInClosedNotch && (ConversationManager.shared.state.isConversing || !CaptionManager.shared.currentAIText.isEmpty)) {
+                if vm.chinHeight > 0 && !isFloatingBarActive {
                     Rectangle()
                         .fill(Color.black.opacity(0.01))
                         .frame(width: computedChinWidth, height: vm.chinHeight)
