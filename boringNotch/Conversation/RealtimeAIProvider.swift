@@ -24,4 +24,5 @@ public protocol RealtimeAIProvider: AnyObject {
     func disconnect()
     func sendAudioChunk(_ data: Data)
     func sendTextMessage(_ text: String)
+    func commitTurn()
 }

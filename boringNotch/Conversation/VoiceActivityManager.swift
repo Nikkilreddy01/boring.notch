@@ -5,8 +5,8 @@
 //  Created by Antigravity on 2026-09-29.
 //
 
-import Foundation
 import Accelerate
+import Foundation
 
 public protocol VoiceActivityDelegate: AnyObject {
     func voiceActivityDidDetectSpeech()
@@ -17,8 +17,8 @@ public protocol VoiceActivityDelegate: AnyObject {
 public final class VoiceActivityManager: @unchecked Sendable {
     public weak var delegate: VoiceActivityDelegate?
 
-    public var speechThreshold: Float = 0.018
-    public var silenceDurationThreshold: TimeInterval = 1.2
+    public var speechThreshold: Float = 0.015
+    public var silenceDurationThreshold: TimeInterval = 0.9
 
     private var isSpeaking: Bool = false
     private var lastSpeechTimestamp: Date = Date()

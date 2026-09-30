@@ -147,10 +147,12 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
     }
 
     nonisolated public func provider(_ provider: any RealtimeAIProvider, didReceiveServerAudio data: Data) {
+        audioStreamManager.playAudioChunk(data)
         Task { @MainActor in
             self.turnResetTask?.cancel()
-            self.state = .assistantSpeaking
-            self.audioStreamManager.playAudioChunk(data)
+            if self.state != .assistantSpeaking {
+                self.state = .assistantSpeaking
+            }
         }
     }
 
@@ -177,7 +179,9 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
                 try? await Task.sleep(for: .seconds(2.5))
                 guard !Task.isCancelled, self.isSessionActive else { return }
                 self.captionManager.commitTurn()
-                self.state = .listening
+                if self.state == .assistantSpeaking || self.state == .thinking {
+                    self.state = .listening
+                }
             }
         }
     }
@@ -236,6 +240,7 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
 
             if self.state == .userSpeaking {
                 self.state = .thinking
+                self.activeAIProvider?.commitTurn()
             }
         }
     }

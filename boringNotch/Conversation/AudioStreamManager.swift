@@ -18,29 +18,32 @@ public protocol AudioStreamManagerDelegate: AnyObject {
 public final class AudioStreamManager: @unchecked Sendable {
     public weak var delegate: AudioStreamManagerDelegate?
 
-    private var inputEngine: AVAudioEngine?
-    private var outputEngine: AVAudioEngine?
+    // Unified audio engine for simultaneous mic input and speaker output
+    private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
-    private var playbackFormat: AVAudioFormat?
+    private let playbackFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
 
     private var isRecording: Bool = false
     private var isPlayingAudio: Bool = false
+    private var pendingBufferCount: Int = 0
     private let audioQueue = DispatchQueue(label: "theboringteam.boringnotch.audiomanager", qos: .userInteractive)
 
     public var isCapturing: Bool { isRecording }
     public var isPlaying: Bool { isPlayingAudio }
 
-    public init() {
-        // Output format from Gemini Live: 24kHz Mono 16-bit PCM
-        playbackFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)
-    }
+    public init() {}
 
-    // MARK: - Microphone Streaming
+    // MARK: - Combined Capture & Playback Setup
     public func startCapture() throws {
         try audioQueue.sync {
             guard !isRecording else { return }
 
             let engine = AVAudioEngine()
+            let player = AVAudioPlayerNode()
+
+            engine.attach(player)
+            engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
+
             let inputNode = engine.inputNode
             let inputFormat = inputNode.outputFormat(forBus: 0)
 
@@ -48,19 +51,21 @@ public final class AudioStreamManager: @unchecked Sendable {
                 throw NSError(domain: "AudioStreamManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid mic sample rate"])
             }
 
-            self.inputEngine = engine
-            let bufferSize: AVAudioFrameCount = 1024
+            self.audioEngine = engine
+            self.playerNode = player
+            self.pendingBufferCount = 0
 
+            let bufferSize: AVAudioFrameCount = 1024
             inputNode.removeTap(onBus: 0)
             inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] (buffer: AVAudioPCMBuffer, _: AVAudioTime) in
                 guard let self = self else { return }
-
                 guard let floatChannels = buffer.floatChannelData else { return }
+
                 let frameLength = Int(buffer.frameLength)
                 let channelCount = Int(buffer.format.channelCount)
                 guard frameLength > 0 else { return }
 
-                // 1. Extract samples (average to mono if multi-channel)
+                // 1. Mono float samples for energy VAD
                 var monoSamples = [Float](repeating: 0, count: frameLength)
                 if channelCount == 1 {
                     monoSamples = Array(UnsafeBufferPointer(start: floatChannels[0], count: frameLength))
@@ -74,7 +79,7 @@ public final class AudioStreamManager: @unchecked Sendable {
 
                 self.delegate?.audioStreamDidUpdateFloatSamples(monoSamples)
 
-                // 2. Downsample linearly to 16,000 Hz Int16 PCM for Gemini
+                // 2. Downsample linearly to 16,000 Hz 16-bit PCM for Gemini
                 let inSampleRate = buffer.format.sampleRate
                 let targetSampleRate: Double = 16000.0
                 let step = inSampleRate / targetSampleRate
@@ -95,6 +100,8 @@ public final class AudioStreamManager: @unchecked Sendable {
 
             engine.prepare()
             try engine.start()
+            player.play()
+
             self.isRecording = true
         }
     }
@@ -103,43 +110,52 @@ public final class AudioStreamManager: @unchecked Sendable {
         audioQueue.sync {
             guard isRecording else { return }
             isRecording = false
-            if let engine = inputEngine {
+            if let engine = audioEngine {
                 engine.inputNode.removeTap(onBus: 0)
                 engine.stop()
             }
-            inputEngine = nil
+            audioEngine = nil
+            playerNode = nil
+            pendingBufferCount = 0
+            isPlayingAudio = false
         }
     }
 
     // MARK: - Audio Playback
     public func playAudioChunk(_ pcmData: Data) {
         audioQueue.async { [weak self] in
-            guard let self = self else { return }
-            self.setupOutputEngineIfNeeded()
+            guard let self = self,
+                  let engine = self.audioEngine,
+                  let player = self.playerNode else { return }
 
-            guard let engine = self.outputEngine,
-                  let player = self.playerNode,
-                  let format = self.playbackFormat else { return }
-
-            let frameCount = UInt32(pcmData.count / 2)
+            let frameCount = pcmData.count / 2
             guard frameCount > 0,
-                  let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
+                  let pcmBuffer = AVAudioPCMBuffer(pcmFormat: self.playbackFormat, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
 
-            pcmBuffer.frameLength = frameCount
-            if let channelData = pcmBuffer.int16ChannelData {
-                pcmData.withUnsafeBytes { rawBufferPointer in
-                    if let baseAddress = rawBufferPointer.baseAddress {
-                        memcpy(channelData[0], baseAddress, Int(frameCount) * 2)
-                    }
+            pcmBuffer.frameLength = AVAudioFrameCount(frameCount)
+            guard let floatChannels = pcmBuffer.floatChannelData else { return }
+            let channel0 = floatChannels[0]
+
+            pcmData.withUnsafeBytes { raw in
+                guard let int16Ptr = raw.bindMemory(to: Int16.self).baseAddress else { return }
+                for i in 0..<frameCount {
+                    channel0[i] = Float(int16Ptr[i]) / 32768.0
                 }
             }
 
             self.isPlayingAudio = true
-            if !engine.isRunning {
-                try? engine.start()
-            }
+            self.pendingBufferCount += 1
 
-            player.scheduleBuffer(pcmBuffer, completionHandler: nil)
+            player.scheduleBuffer(pcmBuffer) { [weak self] in
+                self?.audioQueue.async {
+                    guard let self = self else { return }
+                    self.pendingBufferCount = max(0, self.pendingBufferCount - 1)
+                    if self.pendingBufferCount == 0 {
+                        self.isPlayingAudio = false
+                        self.delegate?.audioStreamPlaybackDidFinish()
+                    }
+                }
+            }
 
             if !player.isPlaying {
                 player.play()
@@ -147,28 +163,11 @@ public final class AudioStreamManager: @unchecked Sendable {
         }
     }
 
-    private func setupOutputEngineIfNeeded() {
-        guard outputEngine == nil else { return }
-
-        let engine = AVAudioEngine()
-        let player = AVAudioPlayerNode()
-
-        engine.attach(player)
-        if let format = playbackFormat {
-            engine.connect(player, to: engine.mainMixerNode, format: format)
-        }
-
-        try? engine.start()
-        player.play()
-
-        self.outputEngine = engine
-        self.playerNode = player
-    }
-
     public func stopPlayback() {
         audioQueue.async { [weak self] in
             guard let self = self, let player = self.playerNode else { return }
             player.stop()
+            self.pendingBufferCount = 0
             self.isPlayingAudio = false
             player.play()
         }
@@ -176,11 +175,5 @@ public final class AudioStreamManager: @unchecked Sendable {
 
     public func stopAll() {
         stopCapture()
-        stopPlayback()
-        audioQueue.sync {
-            outputEngine?.stop()
-            outputEngine = nil
-            playerNode = nil
-        }
     }
 }

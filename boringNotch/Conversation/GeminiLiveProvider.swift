@@ -118,6 +118,23 @@ public final class GeminiLiveProvider: NSObject, RealtimeAIProvider, URLSessionW
         }
     }
 
+    public func commitTurn() {
+        guard isSessionConnected, let task = webSocketTask else { return }
+
+        let payload: [String: Any] = [
+            "clientContent": [
+                "turnComplete": true
+            ]
+        ]
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        let message = URLSessionWebSocketTask.Message.data(jsonData)
+
+        sendQueue.async {
+            task.send(message) { _ in }
+        }
+    }
+
     // MARK: - Private Setup Message
     private func sendSetupMessage(model: String, voice: String, systemInstruction: String) async throws {
         guard let task = webSocketTask else { return }
