@@ -52,6 +52,10 @@ public final class AIConfiguration: @unchecked Sendable {
     }
 
     public var systemInstruction: String {
-        Defaults[.conversationSystemPrompt]
+        let custom = Defaults[.conversationSystemPrompt].trimmingCharacters(in: .whitespacesAndNewlines)
+        if !custom.isEmpty {
+            return custom
+        }
+        return "You are a concise, helpful voice conversation partner living inside the user's macOS notch. You must always speak and reply in English only. Keep answers brief (1-2 short sentences) and completely natural for voice."
     }
 }

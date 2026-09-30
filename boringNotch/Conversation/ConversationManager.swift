@@ -23,10 +23,15 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
     private let audioStreamManager = AudioStreamManager()
     private let voiceActivityManager = VoiceActivityManager()
     private var aiProvider: (any RealtimeAIProvider) = GeminiLiveProvider()
+
+    // Realtime concurrency flags
     private nonisolated(unsafe) var isStreamingActive: Bool = false
     private nonisolated(unsafe) var activeAIProvider: (any RealtimeAIProvider)?
+    private nonisolated(unsafe) var isAssistantSpeaking: Bool = false
+    private nonisolated(unsafe) var isServerGenerating: Bool = false
 
     private var turnResetTask: Task<Void, Never>?
+    private var guardCooldownTask: Task<Void, Never>?
 
     private override init() {
         super.init()
@@ -83,6 +88,8 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
         // 3. Connect Realtime Provider & Audio Streams
         isSessionActive = true
         isStreamingActive = true
+        isAssistantSpeaking = false
+        isServerGenerating = false
         activeAIProvider = aiProvider
         Defaults[.conversationModeEnabled] = true
         state = .listening
@@ -109,9 +116,12 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
 
         isSessionActive = false
         isStreamingActive = false
+        isAssistantSpeaking = false
+        isServerGenerating = false
         activeAIProvider = nil
         Defaults[.conversationModeEnabled] = false
         turnResetTask?.cancel()
+        guardCooldownTask?.cancel()
 
         // Clean up resources immediately
         audioStreamManager.stopAll()
@@ -124,6 +134,11 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
     public func interruptAssistant() {
         audioStreamManager.stopPlayback()
         captionManager.commitTurn()
+        isAssistantSpeaking = false
+        isServerGenerating = false
+        guardCooldownTask?.cancel()
+        turnResetTask?.cancel()
+        audioLevel = 0.0
         state = .listening
     }
 
@@ -147,9 +162,34 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
     }
 
     nonisolated public func provider(_ provider: any RealtimeAIProvider, didReceiveServerAudio data: Data) {
-        audioStreamManager.playAudioChunk(data)
+        self.isAssistantSpeaking = true
+        self.isServerGenerating = true
+        self.audioStreamManager.playAudioChunk(data)
+
+        // Compute peak / RMS audio level of incoming PCM audio for the visualizer
+        let sampleCount = data.count / MemoryLayout<Int16>.size
+        var level: Float = 0.0
+        if sampleCount > 0 {
+            data.withUnsafeBytes { raw in
+                if let ptr = raw.bindMemory(to: Int16.self).baseAddress {
+                    var sum: Float = 0
+                    let stride = max(1, sampleCount / 64)
+                    var count = 0
+                    for i in strideThrough(from: 0, to: sampleCount - 1, by: stride) {
+                        let val = Float(ptr[i]) / 32768.0
+                        sum += val * val
+                        count += 1
+                    }
+                    let rms = sqrt(sum / Float(max(1, count)))
+                    level = min(1.0, rms * 4.0)
+                }
+            }
+        }
+
         Task { @MainActor in
             self.turnResetTask?.cancel()
+            self.guardCooldownTask?.cancel()
+            self.audioLevel = level
             if self.state != .assistantSpeaking {
                 self.state = .assistantSpeaking
             }
@@ -167,21 +207,21 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
             // Server detected user barge-in!
             self.audioStreamManager.stopPlayback()
             self.captionManager.commitTurn()
+            self.isAssistantSpeaking = false
+            self.isServerGenerating = false
+            self.guardCooldownTask?.cancel()
+            self.turnResetTask?.cancel()
+            self.audioLevel = 0.0
             self.state = .userSpeaking
         }
     }
 
     nonisolated public func providerDidCompleteTurn(_ provider: any RealtimeAIProvider) {
+        self.isServerGenerating = false
         Task { @MainActor in
-            self.turnResetTask?.cancel()
-            self.turnResetTask = Task { @MainActor in
-                // Give user a moment to finish listening/reading before returning to ready listening
-                try? await Task.sleep(for: .seconds(2.5))
-                guard !Task.isCancelled, self.isSessionActive else { return }
-                self.captionManager.commitTurn()
-                if self.state == .assistantSpeaking || self.state == .thinking {
-                    self.state = .listening
-                }
+            // If audio player already drained all buffers, initiate return to listening
+            if !self.audioStreamManager.isPlaying {
+                self.scheduleReturnToListening()
             }
         }
     }
@@ -194,19 +234,26 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
 
     // MARK: - AudioStreamManagerDelegate
     nonisolated public func audioStreamDidProduceMicChunk(_ data: Data) {
-        if isStreamingActive {
-            activeAIProvider?.sendAudioChunk(data)
-        }
+        guard isStreamingActive else { return }
+        // CRITICAL ACOUSTIC SHIELD: Never forward mic audio to Gemini while assistant is generating or speaking!
+        // This completely prevents speaker-to-mic acoustic feedback loops and non-English hallucinations.
+        guard !isAssistantSpeaking else { return }
+        activeAIProvider?.sendAudioChunk(data)
     }
 
     nonisolated public func audioStreamDidUpdateFloatSamples(_ samples: [Float]) {
+        guard !isAssistantSpeaking else {
+            // Suppress VAD processing completely while assistant audio is playing through Mac speakers
+            return
+        }
         voiceActivityManager.processAudioBuffer(samples: samples)
     }
 
     nonisolated public func audioStreamPlaybackDidFinish() {
         Task { @MainActor in
-            if self.state == .assistantSpeaking {
-                self.state = .listening
+            // Only transition back to listening if the server is also finished sending chunks
+            if !self.isServerGenerating {
+                self.scheduleReturnToListening()
             }
         }
     }
@@ -222,14 +269,16 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
     nonisolated public func voiceActivityDidDetectSpeech() {
         Task { @MainActor in
             guard self.isSessionActive else { return }
-
-            // Prevent self-interruption: If assistant is already speaking through speakers,
-            // do not cut off speaker audio on mic echo! Gemini Live handles server-side barge-in.
-            if self.state == .assistantSpeaking {
-                return
-            }
+            guard !self.isAssistantSpeaking else { return }
 
             self.turnResetTask?.cancel()
+            self.guardCooldownTask?.cancel()
+
+            // If previous assistant response exists, archive it now so user sees a clean slate
+            if !self.captionManager.currentAIText.isEmpty {
+                self.captionManager.commitTurn()
+            }
+
             self.state = .userSpeaking
         }
     }
@@ -237,9 +286,12 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
     nonisolated public func voiceActivityDidDetectSilence() {
         Task { @MainActor in
             guard self.isSessionActive else { return }
+            guard !self.isAssistantSpeaking else { return }
 
             if self.state == .userSpeaking {
                 self.state = .thinking
+                // Flush any trailing sub-100ms buffered audio so the user's final words are not cut off
+                self.audioStreamManager.flushMicBuffer()
                 self.activeAIProvider?.commitTurn()
             }
         }
@@ -247,7 +299,38 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
 
     nonisolated public func voiceActivityUpdateLevel(_ level: Float) {
         Task { @MainActor in
-            self.audioLevel = level
+            // Only drive visualizer from mic if assistant is not currently speaking
+            if !self.isAssistantSpeaking {
+                self.audioLevel = level
+            }
+        }
+    }
+
+    // MARK: - Cooldown Guard Transition
+    private func scheduleReturnToListening() {
+        guardCooldownTask?.cancel()
+        guardCooldownTask = Task { @MainActor in
+            // 400ms acoustic guard delay: lets room reverb and speaker acoustic decay settle before unmuting mic & VAD
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, self.isSessionActive else { return }
+
+            // Verify server has not started another turn and player is truly quiet
+            guard !self.isServerGenerating && !self.audioStreamManager.isPlaying else { return }
+
+            self.isAssistantSpeaking = false
+            self.audioLevel = 0.0
+
+            if self.state == .assistantSpeaking || self.state == .thinking {
+                self.state = .listening
+            }
+
+            // Keep the assistant's caption on-screen for 2.5 seconds so the user can read it comfortably
+            self.turnResetTask?.cancel()
+            self.turnResetTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2.5))
+                guard !Task.isCancelled, self.isSessionActive else { return }
+                self.captionManager.commitTurn()
+            }
         }
     }
 }

@@ -207,6 +207,6 @@ extension Defaults.Keys {
     static let conversationModelName = Key<String>("conversationModelName", default: "gemini-3.8-live")
     static let conversationVoiceName = Key<String>("conversationVoiceName", default: "Puck")
     static let conversationCaptionsEnabled = Key<Bool>("conversationCaptionsEnabled", default: true)
-    static let conversationSystemPrompt = Key<String>("conversationSystemPrompt", default: "You are a concise, helpful voice conversation partner living inside the user's macOS notch. Keep answers brief (1-2 sentences) and natural, perfect for voice and small captions.")
+    static let conversationSystemPrompt = Key<String>("conversationSystemPrompt", default: "You are a concise, helpful voice conversation partner living inside the user's macOS notch. You must always speak and reply in English only. Keep answers brief (1-2 short sentences) and completely natural for voice.")
 
 }

@@ -141,6 +141,11 @@ public final class GeminiLiveProvider: NSObject, RealtimeAIProvider, URLSessionW
 
         let formattedModel = model.starts(with: "models/") ? model : "models/\(model)"
 
+        let strictEnglishInstruction = """
+        CRITICAL INSTRUCTION: You must strictly speak and respond ONLY in fluent, natural English. Under no circumstances should you ever speak, respond, or switch to any other language, even if background noise or audio input sounds like another language. Always reply in clear English. Keep your answers concise (1-2 short sentences) and natural for a voice conversation.
+
+        """ + systemInstruction
+
         let setupPayload: [String: Any] = [
             "setup": [
                 "model": formattedModel,
@@ -156,10 +161,9 @@ public final class GeminiLiveProvider: NSObject, RealtimeAIProvider, URLSessionW
                 ],
                 "systemInstruction": [
                     "parts": [
-                        ["text": systemInstruction]
+                        ["text": strictEnglishInstruction]
                     ]
                 ],
-                "inputAudioTranscription": [String: Any](),
                 "outputAudioTranscription": [String: Any]()
             ]
         ]
@@ -211,30 +215,34 @@ public final class GeminiLiveProvider: NSObject, RealtimeAIProvider, URLSessionW
 
         // Check for serverContent
         if let serverContent = json["serverContent"] as? [String: Any] {
-            // Live AI Speech Transcription
+            var handledText = false
+
+            // 1. Live AI Speech Transcription
             if let outputTranscription = serverContent["outputTranscription"] as? [String: Any],
                let text = outputTranscription["text"] as? String, !text.isEmpty {
+                handledText = true
                 delegate?.provider(self, didReceiveServerText: text)
             }
 
-            // Live User Speech Recognition
+            // 2. Live User Speech Recognition
             if let inputTranscription = serverContent["inputTranscription"] as? [String: Any],
                let userText = inputTranscription["text"] as? String, !userText.isEmpty {
                 DispatchQueue.main.async {
                     CaptionManager.shared.setUserText(userText)
                 }
             }
-            // 1. Interruption flag
+
+            // 3. Interruption flag
             if let interrupted = serverContent["interrupted"] as? Bool, interrupted {
                 delegate?.provider(self, didDetectInterruption: true)
             }
 
-            // 2. Model Turn (Text and Audio parts)
+            // 4. Model Turn (Text and Audio parts)
             if let modelTurn = serverContent["modelTurn"] as? [String: Any],
                let parts = modelTurn["parts"] as? [[String: Any]] {
                 for part in parts {
-                    // Text transcript chunk
-                    if let text = part["text"] as? String, !text.isEmpty {
+                    // Text transcript chunk (fallback if not already emitted by outputTranscription)
+                    if !handledText, let text = part["text"] as? String, !text.isEmpty {
                         delegate?.provider(self, didReceiveServerText: text)
                     }
 
@@ -247,7 +255,7 @@ public final class GeminiLiveProvider: NSObject, RealtimeAIProvider, URLSessionW
                 }
             }
 
-            // 3. Turn complete flag
+            // 5. Turn complete flag
             if let turnComplete = serverContent["turnComplete"] as? Bool, turnComplete {
                 delegate?.providerDidCompleteTurn(self)
             }

@@ -26,6 +26,7 @@ public final class AudioStreamManager: @unchecked Sendable {
     private var isRecording: Bool = false
     private var isPlayingAudio: Bool = false
     private var pendingBufferCount: Int = 0
+    private var pendingMicData = Data()
     private let audioQueue = DispatchQueue(label: "theboringteam.boringnotch.audiomanager", qos: .userInteractive)
 
     public var isCapturing: Bool { isRecording }
@@ -54,6 +55,7 @@ public final class AudioStreamManager: @unchecked Sendable {
             self.audioEngine = engine
             self.playerNode = player
             self.pendingBufferCount = 0
+            self.pendingMicData = Data()
 
             let bufferSize: AVAudioFrameCount = 1024
             inputNode.removeTap(onBus: 0)
@@ -95,7 +97,13 @@ public final class AudioStreamManager: @unchecked Sendable {
                     }
                 }
 
-                self.delegate?.audioStreamDidProduceMicChunk(int16Data)
+                // 3. Accumulate ~100ms packets (1600 samples = 3200 bytes) to prevent WebSocket packet flood
+                self.pendingMicData.append(int16Data)
+                if self.pendingMicData.count >= 3200 {
+                    let chunk = self.pendingMicData
+                    self.pendingMicData = Data()
+                    self.delegate?.audioStreamDidProduceMicChunk(chunk)
+                }
             }
 
             engine.prepare()
@@ -103,6 +111,17 @@ public final class AudioStreamManager: @unchecked Sendable {
             player.play()
 
             self.isRecording = true
+        }
+    }
+
+    public func flushMicBuffer() {
+        audioQueue.async { [weak self] in
+            guard let self = self else { return }
+            if !self.pendingMicData.isEmpty {
+                let chunk = self.pendingMicData
+                self.pendingMicData = Data()
+                self.delegate?.audioStreamDidProduceMicChunk(chunk)
+            }
         }
     }
 
@@ -117,6 +136,7 @@ public final class AudioStreamManager: @unchecked Sendable {
             audioEngine = nil
             playerNode = nil
             pendingBufferCount = 0
+            pendingMicData = Data()
             isPlayingAudio = false
         }
     }
@@ -128,7 +148,7 @@ public final class AudioStreamManager: @unchecked Sendable {
                   self.audioEngine != nil,
                   let player = self.playerNode else { return }
 
-            let frameCount = pcmData.count / 2
+            let frameCount = pcmData.count / MemoryLayout<Int16>.size
             guard frameCount > 0,
                   let pcmBuffer = AVAudioPCMBuffer(pcmFormat: self.playbackFormat, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
 
