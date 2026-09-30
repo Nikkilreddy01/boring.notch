@@ -200,4 +200,12 @@ extension Defaults.Keys {
     }
 
     static let didClearLegacyURLCacheV1 = Key<Bool>("didClearLegacyURLCache_v1", default: false)
+
+    // MARK: Conversation Mode
+    static let conversationModeEnabled = Key<Bool>("conversationModeEnabled", default: false)
+    static let conversationModelName = Key<String>("conversationModelName", default: "gemini-3.8-live")
+    static let conversationVoiceName = Key<String>("conversationVoiceName", default: "Puck")
+    static let conversationCaptionsEnabled = Key<Bool>("conversationCaptionsEnabled", default: true)
+    static let conversationSystemPrompt = Key<String>("conversationSystemPrompt", default: "You are a concise, helpful voice conversation partner living inside the user's macOS notch. Keep answers brief (1-2 sentences) and natural, perfect for voice and small captions.")
+
 }

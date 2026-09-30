@@ -38,6 +38,19 @@ struct DynamicNotchApp: App {
             .keyboardShortcut(KeyEquivalent(","), modifiers: .command)
             CheckForUpdatesView(updater: updaterController.updater)
             Divider()
+            Toggle("Conversation Mode", isOn: Binding(
+                get: { Defaults[.conversationModeEnabled] },
+                set: { enabled in
+                    if enabled {
+                        Task { @MainActor in
+                            await ConversationManager.shared.startConversation()
+                        }
+                    } else {
+                        ConversationManager.shared.stopConversation()
+                    }
+                }
+            ))
+            Divider()
             Button("Restart Boring Notch") {
                 ApplicationRelauncher.restart()
             }
@@ -349,6 +362,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { @MainActor in
                     self?.onScreenUnlocked(notification)
                 }
+        }
+
+        KeyboardShortcuts.onKeyDown(for: .toggleConversationMode) {
+            Task { @MainActor in
+                ConversationManager.shared.toggleConversationMode()
+            }
         }
 
         KeyboardShortcuts.onKeyDown(for: .toggleSneakPeek) { [weak self] in

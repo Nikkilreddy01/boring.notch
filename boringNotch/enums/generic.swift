@@ -27,6 +27,7 @@ public enum NotchState {
 public enum NotchViews {
     case home
     case shelf
+    case conversation
 }
 
 enum SettingsEnum {
@@ -38,6 +39,7 @@ enum SettingsEnum {
     case hud
     case shelf
     case extensions
+    case conversation
 }
 
 enum DownloadIndicatorStyle: String, Defaults.Serializable {

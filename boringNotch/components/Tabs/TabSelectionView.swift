@@ -1,3 +1,4 @@
+import Defaults
 //
 //  TabSelectionView.swift
 //  boringNotch
@@ -21,10 +22,23 @@ let tabs = [
 
 struct TabSelectionView: View {
     @ObservedObject var coordinator = BoringViewCoordinator.shared
+    @Default(.conversationModeEnabled) var conversationModeEnabled
     @Namespace var animation
+
+    private var activeTabs: [TabModel] {
+        var items = [
+            TabModel(label: "Home", icon: "house.fill", view: .home),
+            TabModel(label: "Shelf", icon: "tray.fill", view: .shelf)
+        ]
+        if conversationModeEnabled {
+            items.append(TabModel(label: "Voice", icon: "waveform", view: .conversation))
+        }
+        return items
+    }
+
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(tabs) { tab in
+            ForEach(activeTabs) { tab in
                     TabButton(label: tab.label, icon: tab.icon, selected: coordinator.currentView == tab.view) {
                         withAnimation(.smooth) {
                             coordinator.currentView = tab.view

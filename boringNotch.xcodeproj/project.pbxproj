@@ -7,6 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CB0000012E90000100000002 /* ConversationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000012E90000100000001 /* ConversationState.swift */; };
+		CB0000022E90000100000002 /* AIConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000022E90000100000001 /* AIConfiguration.swift */; };
+		CB0000032E90000100000002 /* RealtimeAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000032E90000100000001 /* RealtimeAIProvider.swift */; };
+		CB0000042E90000100000002 /* GeminiLiveProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000042E90000100000001 /* GeminiLiveProvider.swift */; };
+		CB0000052E90000100000002 /* VoiceActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000052E90000100000001 /* VoiceActivityManager.swift */; };
+		CB0000062E90000100000002 /* AudioStreamManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000062E90000100000001 /* AudioStreamManager.swift */; };
+		CB0000072E90000100000002 /* CaptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000072E90000100000001 /* CaptionManager.swift */; };
+		CB0000082E90000100000002 /* ConversationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000082E90000100000001 /* ConversationManager.swift */; };
+		CB0000092E90000100000002 /* ConversationClosedNotchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000092E90000100000001 /* ConversationClosedNotchView.swift */; };
+		CB0000102E90000100000002 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000102E90000100000001 /* ConversationView.swift */; };
 		1100290C2E847E2800035A57 /* NSItemProvider+LoadHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100290B2E847E2800035A57 /* NSItemProvider+LoadHelpers.swift */; };
 		110029272E84FD4C00035A57 /* TemporaryFileStorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110029262E84FD4C00035A57 /* TemporaryFileStorageService.swift */; };
 		1100292A2E8691B400035A57 /* FileShareView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110029292E8691B400035A57 /* FileShareView.swift */; };
@@ -182,6 +192,16 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		CB0000012E90000100000001 /* ConversationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationState.swift; sourceTree = "<group>"; };
+		CB0000022E90000100000001 /* AIConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIConfiguration.swift; sourceTree = "<group>"; };
+		CB0000032E90000100000001 /* RealtimeAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeAIProvider.swift; sourceTree = "<group>"; };
+		CB0000042E90000100000001 /* GeminiLiveProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiLiveProvider.swift; sourceTree = "<group>"; };
+		CB0000052E90000100000001 /* VoiceActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceActivityManager.swift; sourceTree = "<group>"; };
+		CB0000062E90000100000001 /* AudioStreamManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioStreamManager.swift; sourceTree = "<group>"; };
+		CB0000072E90000100000001 /* CaptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptionManager.swift; sourceTree = "<group>"; };
+		CB0000082E90000100000001 /* ConversationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationManager.swift; sourceTree = "<group>"; };
+		CB0000092E90000100000001 /* ConversationClosedNotchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationClosedNotchView.swift; sourceTree = "<group>"; };
+		CB0000102E90000100000001 /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
 		1100290B2E847E2800035A57 /* NSItemProvider+LoadHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSItemProvider+LoadHelpers.swift"; sourceTree = "<group>"; };
 		110029262E84FD4C00035A57 /* TemporaryFileStorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemporaryFileStorageService.swift; sourceTree = "<group>"; };
 		110029292E8691B400035A57 /* FileShareView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileShareView.swift; sourceTree = "<group>"; };
@@ -359,6 +379,30 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		CB0000202E90000100000001 /* Conversation */ = {
+			isa = PBXGroup;
+			children = (
+				CB0000012E90000100000001 /* ConversationState.swift */,
+				CB0000022E90000100000001 /* AIConfiguration.swift */,
+				CB0000032E90000100000001 /* RealtimeAIProvider.swift */,
+				CB0000042E90000100000001 /* GeminiLiveProvider.swift */,
+				CB0000052E90000100000001 /* VoiceActivityManager.swift */,
+				CB0000062E90000100000001 /* AudioStreamManager.swift */,
+				CB0000072E90000100000001 /* CaptionManager.swift */,
+				CB0000082E90000100000001 /* ConversationManager.swift */,
+			);
+			path = Conversation;
+			sourceTree = "<group>";
+		};
+		CB0000212E90000100000001 /* Conversation */ = {
+			isa = PBXGroup;
+			children = (
+				CB0000092E90000100000001 /* ConversationClosedNotchView.swift */,
+				CB0000102E90000100000001 /* ConversationView.swift */,
+			);
+			path = Conversation;
+			sourceTree = "<group>";
+		};
 		1113ABB82E80E27000EC13B2 /* Models */ = {
 			isa = PBXGroup;
 			children = (
@@ -488,6 +532,7 @@
 		1471639B2C5D362F0068B555 /* components */ = {
 			isa = PBXGroup;
 			children = (
+				CB0000212E90000100000001 /* Conversation */,
 				B141C23B2CA5F50900AC8CC8 /* Onboarding */,
 				B1C448992C97375A001F0858 /* Tips */,
 				14C08BB72C8DE49E000F8AA0 /* Calendar */,
@@ -563,6 +608,7 @@
 		14CEF4142C5CAED300855D72 /* boringNotch */ = {
 			isa = PBXGroup;
 			children = (
+				CB0000202E90000100000001 /* Conversation */,
 				11F748672EC9AC9600F841DB /* XPCHelperClient */,
 				116398942DF5D6B40052E6AF /* Providers */,
 				14288DE22C6E016F00B9F80C /* observers */,
@@ -908,6 +954,16 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CB0000012E90000100000002 /* ConversationState.swift in Sources */,
+				CB0000022E90000100000002 /* AIConfiguration.swift in Sources */,
+				CB0000032E90000100000002 /* RealtimeAIProvider.swift in Sources */,
+				CB0000042E90000100000002 /* GeminiLiveProvider.swift in Sources */,
+				CB0000052E90000100000002 /* VoiceActivityManager.swift in Sources */,
+				CB0000062E90000100000002 /* AudioStreamManager.swift in Sources */,
+				CB0000072E90000100000002 /* CaptionManager.swift in Sources */,
+				CB0000082E90000100000002 /* ConversationManager.swift in Sources */,
+				CB0000092E90000100000002 /* ConversationClosedNotchView.swift in Sources */,
+				CB0000102E90000100000002 /* ConversationView.swift in Sources */,
 				115C12EC2ED3D003009754CA /* OpenNotchHUD.swift in Sources */,
 				14C08BB92C8DE4B1000F8AA0 /* BoringCalendar.swift in Sources */,
 				5955950D2E900ED800C66711 /* ApplicationRelauncher.swift in Sources */,

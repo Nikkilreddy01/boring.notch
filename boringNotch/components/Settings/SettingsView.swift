@@ -51,6 +51,9 @@ struct SettingsView: View {
                 NavigationLink(value: "Shelf") {
                     Label("Shelf", systemImage: "books.vertical")
                 }
+                NavigationLink(value: "Conversation") {
+                    Label("Conversation", systemImage: "waveform.and.mic")
+                }
                 NavigationLink(value: "Shortcuts") {
                     Label("Shortcuts", systemImage: "keyboard")
                 }
@@ -85,6 +88,8 @@ struct SettingsView: View {
                     Charge()
                 case "Shelf":
                     Shelf()
+                case "Conversation":
+                    ConversationSettings()
                 case "Shortcuts":
                     Shortcuts()
                 case "Extensions":
@@ -1747,6 +1752,15 @@ struct Shortcuts: View {
             Section {
                 KeyboardShortcuts.Recorder("Toggle Notch Open:", name: .toggleNotchOpen)
             }
+            Section {
+                KeyboardShortcuts.Recorder("Toggle Conversation Mode:", name: .toggleConversationMode)
+            } header: {
+                Text("Conversation")
+            } footer: {
+                Text("Activates or stops continuous voice conversation with Gemini.")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
         }
         .accentColor(.effectiveAccent)
         .navigationTitle("Shortcuts")
@@ -1803,4 +1817,130 @@ func warningBadge(_ text: String, _ description: String) -> some View {
 
 #Preview {
     HUD()
+}
+
+
+struct ConversationSettings: View {
+    @Default(.conversationModeEnabled) var conversationModeEnabled
+    @Default(.conversationModelName) var conversationModelName
+    @Default(.conversationVoiceName) var conversationVoiceName
+    @Default(.conversationCaptionsEnabled) var conversationCaptionsEnabled
+    @Default(.conversationSystemPrompt) var conversationSystemPrompt
+
+    @State private var apiKeyInput: String = ""
+    @State private var showKeySavedToast: Bool = false
+    @State private var showKeyVisible: Bool = false
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(isOn: Binding(
+                    get: { conversationModeEnabled },
+                    set: { enabled in
+                        conversationModeEnabled = enabled
+                        if enabled {
+                            Task { @MainActor in
+                                await ConversationManager.shared.startConversation()
+                            }
+                        } else {
+                            ConversationManager.shared.stopConversation()
+                        }
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Enable Continuous Voice Conversation")
+                            .font(.headline)
+                        Text("Speak naturally to your Mac. AI responds through voice with live notch captions.")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+                }
+                .tint(.effectiveAccent)
+            }
+
+            Section(header: Text("Gemini Live API Key")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        if showKeyVisible {
+                            TextField("Enter Gemini API Key", text: $apiKeyInput)
+                                .textFieldStyle(.roundedBorder)
+                        } else {
+                            SecureField("Enter Gemini API Key", text: $apiKeyInput)
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        Button(action: {
+                            showKeyVisible.toggle()
+                        }) {
+                            Image(systemName: showKeyVisible ? "eye.slash" : "eye")
+                        }
+                        .buttonStyle(.plain)
+
+                        Button("Save") {
+                            AIConfiguration.shared.setApiKey(apiKeyInput)
+                            showKeySavedToast = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                showKeySavedToast = false
+                            }
+                        }
+                        .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    HStack {
+                        Text("Stored securely in macOS Keychain.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        if showKeySavedToast {
+                            Text("Saved to Keychain!")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                        }
+
+                        Spacer()
+
+                        Link("Get a Free API Key ↗", destination: URL(string: "https://aistudio.google.com/app/apikey")!)
+                            .font(.caption)
+                    }
+                }
+                .onAppear {
+                    apiKeyInput = AIConfiguration.shared.getApiKey()
+                }
+            }
+
+            Section(header: Text("Voice & Model Settings")) {
+                Picker("AI Voice", selection: $conversationVoiceName) {
+                    ForEach(AIConfiguration.availableVoices, id: \.self) { voice in
+                        Text(voice).tag(voice)
+                    }
+                }
+
+                Picker("Live Model", selection: $conversationModelName) {
+                    ForEach(AIConfiguration.availableModels, id: \.self) { model in
+                        Text(model).tag(model)
+                    }
+                }
+
+                Toggle("Live Captions in Notch", isOn: $conversationCaptionsEnabled)
+                    .tint(.effectiveAccent)
+
+                KeyboardShortcuts.Recorder("Global Shortcut:", name: .toggleConversationMode)
+            }
+
+            Section(header: Text("System Persona & Instructions")) {
+                TextEditor(text: $conversationSystemPrompt)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(height: 70)
+                    .padding(4)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2)))
+                Text("Customize how your AI companion acts. Keep instructions concise for low latency.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .accentColor(.effectiveAccent)
+        .navigationTitle("Conversation")
+    }
 }
