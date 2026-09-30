@@ -72,8 +72,11 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
         // 2. Validate API Key
         let apiKey = AIConfiguration.shared.getApiKey()
         guard !apiKey.isEmpty else {
-            state = .error("Gemini API key missing in Settings")
+            state = .error("API Key Required: Enter in Settings (⌘ ,)")
             Defaults[.conversationModeEnabled] = false
+            DispatchQueue.main.async {
+                SettingsWindowController.shared.showWindow()
+            }
             return
         }
 
@@ -216,10 +219,10 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
         Task { @MainActor in
             guard self.isSessionActive else { return }
 
-            // Local Barge-In: If user starts speaking while assistant is speaking, cut audio immediately!
+            // Prevent self-interruption: If assistant is already speaking through speakers,
+            // do not cut off speaker audio on mic echo! Gemini Live handles server-side barge-in.
             if self.state == .assistantSpeaking {
-                self.audioStreamManager.stopPlayback()
-                self.captionManager.commitTurn()
+                return
             }
 
             self.turnResetTask?.cancel()

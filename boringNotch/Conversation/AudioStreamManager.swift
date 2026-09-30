@@ -18,37 +18,26 @@ public protocol AudioStreamManagerDelegate: AnyObject {
 public final class AudioStreamManager: @unchecked Sendable {
     public weak var delegate: AudioStreamManagerDelegate?
 
-    // Audio Engines
     private var inputEngine: AVAudioEngine?
     private var outputEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
-
-    private var audioConverter: AVAudioConverter?
-    private var targetMicFormat: AVAudioFormat?
     private var playbackFormat: AVAudioFormat?
 
     private var isRecording: Bool = false
     private var isPlayingAudio: Bool = false
     private let audioQueue = DispatchQueue(label: "theboringteam.boringnotch.audiomanager", qos: .userInteractive)
 
-    public var isCapturing: Bool {
-        isRecording
-    }
-
-    public var isPlaying: Bool {
-        isPlayingAudio
-    }
+    public var isCapturing: Bool { isRecording }
+    public var isPlaying: Bool { isPlayingAudio }
 
     public init() {
         // Output format from Gemini Live: 24kHz Mono 16-bit PCM
         playbackFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)
-        // Mic input format to Gemini Live: 16kHz Mono 16-bit PCM
-        targetMicFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)
     }
 
     // MARK: - Microphone Streaming
     public func startCapture() throws {
-        audioQueue.sync {
+        try audioQueue.sync {
             guard !isRecording else { return }
 
             let engine = AVAudioEngine()
@@ -56,70 +45,57 @@ public final class AudioStreamManager: @unchecked Sendable {
             let inputFormat = inputNode.outputFormat(forBus: 0)
 
             guard inputFormat.sampleRate > 0 else {
-                return
+                throw NSError(domain: "AudioStreamManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid mic sample rate"])
             }
 
-            guard let targetFormat = self.targetMicFormat,
-                  let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-                return
-            }
-
-            self.audioConverter = converter
             self.inputEngine = engine
-
             let bufferSize: AVAudioFrameCount = 1024
+
             inputNode.removeTap(onBus: 0)
             inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] (buffer: AVAudioPCMBuffer, _: AVAudioTime) in
                 guard let self = self else { return }
 
-                // 1. Extract float samples for VAD & UI visualizer
-                if let floatChannel = buffer.floatChannelData {
-                    let frameCount = Int(buffer.frameLength)
-                    let samples = Array(UnsafeBufferPointer(start: floatChannel[0], count: frameCount))
-                    self.delegate?.audioStreamDidUpdateFloatSamples(samples)
+                guard let floatChannels = buffer.floatChannelData else { return }
+                let frameLength = Int(buffer.frameLength)
+                let channelCount = Int(buffer.format.channelCount)
+                guard frameLength > 0 else { return }
+
+                // 1. Extract samples (average to mono if multi-channel)
+                var monoSamples = [Float](repeating: 0, count: frameLength)
+                if channelCount == 1 {
+                    monoSamples = Array(UnsafeBufferPointer(start: floatChannels[0], count: frameLength))
+                } else {
+                    let ch0 = floatChannels[0]
+                    let ch1 = floatChannels[1]
+                    for i in 0..<frameLength {
+                        monoSamples[i] = (ch0[i] + ch1[i]) * 0.5
+                    }
                 }
 
-                // 2. Convert to 16kHz Int16 PCM for Gemini
-                self.convertAndStream(buffer: buffer)
+                self.delegate?.audioStreamDidUpdateFloatSamples(monoSamples)
+
+                // 2. Downsample linearly to 16,000 Hz Int16 PCM for Gemini
+                let inSampleRate = buffer.format.sampleRate
+                let targetSampleRate: Double = 16000.0
+                let step = inSampleRate / targetSampleRate
+                let outLength = max(1, Int(Double(frameLength) / step))
+
+                var int16Data = Data(capacity: outLength * 2)
+                for i in 0..<outLength {
+                    let srcIndex = min(Int(Double(i) * step), frameLength - 1)
+                    let clamped = max(-1.0, min(1.0, monoSamples[srcIndex]))
+                    var sample16 = Int16(clamped * 32767.0)
+                    withUnsafeBytes(of: &sample16) { bytes in
+                        int16Data.append(contentsOf: bytes)
+                    }
+                }
+
+                self.delegate?.audioStreamDidProduceMicChunk(int16Data)
             }
 
-            do {
-                try engine.start()
-                self.isRecording = true
-            } catch {
-                self.delegate?.audioStreamDidFail(error: error)
-            }
-        }
-    }
-
-    private func convertAndStream(buffer: AVAudioPCMBuffer) {
-        guard let converter = self.audioConverter, let targetFormat = self.targetMicFormat else { return }
-
-        let sampleRateRatio = targetFormat.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * sampleRateRatio + 10)
-        guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return }
-
-        var error: NSError?
-        var hasProvidedInput = false
-
-        let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
-            if !hasProvidedInput {
-                hasProvidedInput = true
-                outStatus.pointee = .haveData
-                return buffer
-            } else {
-                outStatus.pointee = .noDataNow
-                return nil
-            }
-        }
-
-        let status = converter.convert(to: convertedBuffer, error: &error, withInputFrom: inputBlock)
-        if status == .haveData || status == .inputRanDry {
-            if convertedBuffer.frameLength > 0, let int16Data = convertedBuffer.int16ChannelData {
-                let byteCount = Int(convertedBuffer.frameLength) * 2 // 2 bytes per sample
-                let data = Data(bytes: int16Data[0], count: byteCount)
-                self.delegate?.audioStreamDidProduceMicChunk(data)
-            }
+            engine.prepare()
+            try engine.start()
+            self.isRecording = true
         }
     }
 
@@ -132,22 +108,20 @@ public final class AudioStreamManager: @unchecked Sendable {
                 engine.stop()
             }
             inputEngine = nil
-            audioConverter = nil
         }
     }
 
-    // MARK: - Audio Playback (Speaker Output)
+    // MARK: - Audio Playback
     public func playAudioChunk(_ pcmData: Data) {
         audioQueue.async { [weak self] in
             guard let self = self else { return }
-
             self.setupOutputEngineIfNeeded()
 
             guard let engine = self.outputEngine,
                   let player = self.playerNode,
                   let format = self.playbackFormat else { return }
 
-            let frameCount = UInt32(pcmData.count / 2) // 16-bit mono = 2 bytes per frame
+            let frameCount = UInt32(pcmData.count / 2)
             guard frameCount > 0,
                   let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
 
@@ -155,7 +129,7 @@ public final class AudioStreamManager: @unchecked Sendable {
             if let channelData = pcmBuffer.int16ChannelData {
                 pcmData.withUnsafeBytes { rawBufferPointer in
                     if let baseAddress = rawBufferPointer.baseAddress {
-                        memcpy(channelData[0], baseAddress, pcmData.count)
+                        memcpy(channelData[0], baseAddress, Int(frameCount) * 2)
                     }
                 }
             }
@@ -191,13 +165,12 @@ public final class AudioStreamManager: @unchecked Sendable {
         self.playerNode = player
     }
 
-    /// Instant Barge-in / Interruption: Stops speaker output and flushes all queued audio buffers
     public func stopPlayback() {
         audioQueue.async { [weak self] in
             guard let self = self, let player = self.playerNode else { return }
-            player.stop() // Immediately flushes queued buffers
+            player.stop()
             self.isPlayingAudio = false
-            player.play() // Ready for next turn
+            player.play()
         }
     }
 

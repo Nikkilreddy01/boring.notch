@@ -1822,13 +1822,12 @@ func warningBadge(_ text: String, _ description: String) -> some View {
 
 struct ConversationSettings: View {
     @Default(.conversationModeEnabled) var conversationModeEnabled
+    @Default(.geminiApiKey) var geminiApiKey
     @Default(.conversationModelName) var conversationModelName
     @Default(.conversationVoiceName) var conversationVoiceName
     @Default(.conversationCaptionsEnabled) var conversationCaptionsEnabled
     @Default(.conversationSystemPrompt) var conversationSystemPrompt
 
-    @State private var apiKeyInput: String = ""
-    @State private var showKeySavedToast: Bool = false
     @State private var showKeyVisible: Bool = false
 
     var body: some View {
@@ -1862,10 +1861,10 @@ struct ConversationSettings: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         if showKeyVisible {
-                            TextField("Enter Gemini API Key", text: $apiKeyInput)
+                            TextField("Enter Gemini API Key", text: $geminiApiKey)
                                 .textFieldStyle(.roundedBorder)
                         } else {
-                            SecureField("Enter Gemini API Key", text: $apiKeyInput)
+                            SecureField("Enter Gemini API Key", text: $geminiApiKey)
                                 .textFieldStyle(.roundedBorder)
                         }
 
@@ -1875,36 +1874,18 @@ struct ConversationSettings: View {
                             Image(systemName: showKeyVisible ? "eye.slash" : "eye")
                         }
                         .buttonStyle(.plain)
-
-                        Button("Save") {
-                            AIConfiguration.shared.setApiKey(apiKeyInput)
-                            showKeySavedToast = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                showKeySavedToast = false
-                            }
-                        }
-                        .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
 
                     HStack {
-                        Text("Stored securely in macOS Keychain.")
+                        Text("Saved automatically in app preferences. No system Keychain prompts.")
                             .font(.caption)
                             .foregroundColor(.secondary)
-
-                        if showKeySavedToast {
-                            Text("Saved to Keychain!")
-                                .font(.caption)
-                                .foregroundColor(.green)
-                        }
 
                         Spacer()
 
                         Link("Get a Free API Key ↗", destination: URL(string: "https://aistudio.google.com/app/apikey")!)
                             .font(.caption)
                     }
-                }
-                .onAppear {
-                    apiKeyInput = AIConfiguration.shared.getApiKey()
                 }
             }
 

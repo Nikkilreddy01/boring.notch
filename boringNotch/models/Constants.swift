@@ -202,6 +202,7 @@ extension Defaults.Keys {
     static let didClearLegacyURLCacheV1 = Key<Bool>("didClearLegacyURLCache_v1", default: false)
 
     // MARK: Conversation Mode
+    static let geminiApiKey = Key<String>("geminiApiKey", default: "")
     static let conversationModeEnabled = Key<Bool>("conversationModeEnabled", default: false)
     static let conversationModelName = Key<String>("conversationModelName", default: "gemini-3.8-live")
     static let conversationVoiceName = Key<String>("conversationVoiceName", default: "Puck")
