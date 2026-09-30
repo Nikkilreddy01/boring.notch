@@ -30,12 +30,11 @@ struct MinimalLyricsView: View {
     }
 
     var body: some View {
-        let lyricIndex = musicManager.currentLyricIndex
-        let hasLyrics = !musicManager.lyrics.isEmpty && lyricIndex >= 0 && lyricIndex < musicManager.lyrics.count
+        let (current, next, lyricIndex) = musicManager.currentAndNextLyric(at: musicManager.elapsedTime)
 
-        let current: String = {
-            if hasLyrics {
-                return musicManager.lyrics[lyricIndex].words
+        let resolvedCurrent: String = {
+            if !current.isEmpty {
+                return current
             }
             if musicManager.isFetchingLyrics {
                 return "Fetching lyrics…"
@@ -43,17 +42,17 @@ struct MinimalLyricsView: View {
             return musicManager.songTitle
         }()
 
-        let next: String = {
-            if hasLyrics && (lyricIndex + 1) < musicManager.lyrics.count {
-                return musicManager.lyrics[lyricIndex + 1].words
+        let resolvedNext: String = {
+            if !next.isEmpty {
+                return next
             }
-            if !hasLyrics && !musicManager.isFetchingLyrics {
+            if current.isEmpty && !musicManager.isFetchingLyrics {
                 return musicManager.artistName
             }
             return ""
         }()
 
-        let displayCurrent = current.isEmpty ? musicManager.songTitle : current
+        let displayCurrent = resolvedCurrent.isEmpty ? musicManager.songTitle : resolvedCurrent
         let isLongCurrent = displayCurrent.count > 34
         let barHeight: CGFloat = isLongCurrent ? 52 : 46
         let cornerRadius: CGFloat = isLongCurrent ? 20 : 23
@@ -80,7 +79,7 @@ struct MinimalLyricsView: View {
                     albumArtView
 
                     // CENTER: Current + Next Lyrics (Vertical Flow Transition)
-                    lyricContentView(displayCurrent: displayCurrent, next: next, lyricIndex: lyricIndex, isLongCurrent: isLongCurrent)
+                    lyricContentView(displayCurrent: displayCurrent, next: resolvedNext, lyricIndex: lyricIndex, isLongCurrent: isLongCurrent)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     // RIGHT: Existing Music Indicator with Adaptive Artwork Accent

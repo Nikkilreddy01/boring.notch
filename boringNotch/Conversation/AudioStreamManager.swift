@@ -125,7 +125,7 @@ public final class AudioStreamManager: @unchecked Sendable {
     public func playAudioChunk(_ pcmData: Data) {
         audioQueue.async { [weak self] in
             guard let self = self,
-                  let engine = self.audioEngine,
+                  self.audioEngine != nil,
                   let player = self.playerNode else { return }
 
             let frameCount = pcmData.count / 2
