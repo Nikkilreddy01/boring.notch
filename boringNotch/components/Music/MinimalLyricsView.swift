@@ -16,6 +16,16 @@ struct MinimalLyricsView: View {
     @State private var isTimedOut: Bool = false
     @State private var pauseInactivityTask: Task<Void, Never>?
 
+    @State private var isPointerInside = false
+    @State private var dragOffset: CGFloat = 0
+    @State private var isDismissed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var isVisible: Bool { isExpanded && !isTimedOut && !isDismissed }
+    private var motion: Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.48, dampingFraction: 0.82)
+    }
+
     private let targetWidth: CGFloat = 390
 
     private var hasPhysicalNotch: Bool {
@@ -30,7 +40,14 @@ struct MinimalLyricsView: View {
     }
 
     var body: some View {
-        let (current, next, lyricIndex) = musicManager.currentAndNextLyric(at: musicManager.elapsedTime)
+        TimelineView(.animation(minimumInterval: 0.1, paused: !musicManager.isPlaying)) { timeline in
+            lyricsBody(at: timeline.date)
+        }
+    }
+
+    @ViewBuilder
+    private func lyricsBody(at date: Date) -> some View {
+        let (current, next, lyricIndex) = musicManager.currentAndNextLyric(at: musicManager.estimatedPlaybackPosition(at: date))
 
         let resolvedCurrent: String = {
             if !current.isEmpty {
@@ -66,6 +83,7 @@ struct MinimalLyricsView: View {
                 )
                 .fill(Color.black)
                 .frame(width: vm.closedNotchSize.width, height: notchHeight)
+                .zIndex(1)
             }
 
             // 2. Clear Gap Between Physical Notch and Floating Bar
@@ -73,7 +91,7 @@ struct MinimalLyricsView: View {
                 .frame(width: targetWidth, height: (notchHeight > 0 ? 8 : 12))
 
             // 3. Separate Floating Liquid Glass Bar Below the Notch
-            if isExpanded && !isTimedOut {
+            ZStack {
                 HStack(spacing: 12) {
                     // LEFT: Album Artwork (Circular with subtle border & shadow)
                     albumArtView
@@ -92,12 +110,29 @@ struct MinimalLyricsView: View {
                 )
                 .shadow(color: Color.black.opacity(0.28), radius: 14, x: 0, y: 7)
                 .shadow(color: Color.black.opacity(0.15), radius: 3, x: 0, y: 1)
-                .transition(
-                    .asymmetric(
-                        insertion: .scale(scale: 0.94, anchor: .top).combined(with: .opacity),
-                        removal: .scale(scale: 0.94, anchor: .top).combined(with: .opacity)
-                    )
-                )
+                .scaleEffect(x: isVisible || reduceMotion ? 1 : 0.28, y: isVisible || reduceMotion ? 1 : 0.08, anchor: .top)
+                .offset(y: reduceMotion ? 0 : (isVisible ? dragOffset : -(notchHeight > 0 ? 24 : 12)))
+                .opacity(isVisible && !isPointerInside ? 1 : 0)
+                .animation(motion, value: isVisible)
+                .animation(.easeInOut(duration: 0.18), value: isPointerInside)
+                .background {
+                    LyricsPointerRegion(visible: isVisible, onHover: { isPointerInside = $0 })
+                }
+                .panGesture(direction: .up) { translation, phase in
+                    guard isVisible else { return }
+                    if phase == .ended {
+                        withAnimation(motion) { dragOffset = 0 }
+                    } else {
+                        dragOffset = -min(translation, 24)
+                        if translation > 18 {
+                            withAnimation(motion) {
+                                isDismissed = true
+                                dragOffset = 0
+                            }
+                        }
+                    }
+                }
+
             }
         }
         .frame(width: targetWidth, alignment: .top)
@@ -109,6 +144,15 @@ struct MinimalLyricsView: View {
                 isExpanded = true
             }
             handlePlaybackChange(isPlaying: musicManager.isPlaying)
+        }
+        .onDisappear {
+            pauseInactivityTask?.cancel()
+        }
+        .onChange(of: musicManager.songTitle) { _, _ in
+            withAnimation(motion) { isDismissed = false }
+        }
+        .onChange(of: musicManager.artistName) { _, _ in
+            withAnimation(motion) { isDismissed = false }
         }
         .onChange(of: musicManager.isPlaying) { _, isPlaying in
             handlePlaybackChange(isPlaying: isPlaying)
@@ -166,6 +210,7 @@ struct MinimalLyricsView: View {
 
         if isPlaying {
             withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) {
+                isDismissed = false
                 isTimedOut = false
                 isExpanded = true
             }
@@ -261,5 +306,99 @@ struct MinimalLyricsView: View {
         }
         .animation(.spring(response: 0.42, dampingFraction: 0.85), value: lyricIndex)
         .clipped()
+    }
+}
+
+/// Poll the screen position so exit detection continues while the window passes clicks through.
+/// The top edge remains a grab zone so an invisible bubble can still be dragged into the notch.
+private struct LyricsPointerRegion: NSViewRepresentable {
+    var visible: Bool
+    var onHover: (Bool) -> Void
+
+    func makeNSView(context: Context) -> RegionView { RegionView() }
+
+    func updateNSView(_ view: RegionView, context: Context) {
+        view.visible = visible
+        view.onHover = onHover
+    }
+
+    static func dismantleNSView(_ view: RegionView, coordinator: ()) { view.stop() }
+
+    final class RegionView: NSView {
+        var visible = false
+        var onHover: ((Bool) -> Void)?
+        private var timer: Timer?
+        private var enteredAt: Date?
+        private var revealed = false
+        private var isCapturingDrag = false
+        private weak var passthroughWindow: NSWindow?
+
+        // The fade is immediate, but keeping the window interactive briefly lets a
+        // normal upward drag begin anywhere on the bar before clicks pass through.
+        private let passthroughDelay: TimeInterval = 0.6
+        private let grabZoneHeight: CGFloat = 10
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.updatePointer() }
+            RunLoop.main.add(timer!, forMode: .common)
+        }
+
+        func stop() {
+            timer?.invalidate()
+            timer = nil
+            enteredAt = nil
+            revealed = false
+            isCapturingDrag = false
+            onHover?(false)
+            passthroughWindow?.ignoresMouseEvents = false
+            passthroughWindow = nil
+        }
+
+        private func updatePointer() {
+            guard let window else { return }
+            let rect = window.convertToScreen(convert(bounds, to: nil))
+            let pointer = NSEvent.mouseLocation
+            let inside = visible && rect.contains(pointer)
+            let inGrabZone = inside && pointer.y >= rect.maxY - grabZoneHeight
+            let primaryButtonDown = NSEvent.pressedMouseButtons & 1 != 0
+
+            if !inside {
+                enteredAt = nil
+                isCapturingDrag = false
+            } else if enteredAt == nil {
+                enteredAt = Date()
+            }
+
+            if inGrabZone && primaryButtonDown {
+                isCapturingDrag = true
+            } else if !primaryButtonDown {
+                isCapturingDrag = false
+            }
+
+            let hoverDuration = Date().timeIntervalSince(enteredAt ?? Date())
+            let shouldReveal = inside
+            let shouldPassThrough = inside
+                && hoverDuration >= passthroughDelay
+                && !inGrabZone
+                && !isCapturingDrag
+
+            if revealed != shouldReveal {
+                revealed = shouldReveal
+                onHover?(revealed)
+            }
+
+            if shouldPassThrough {
+                passthroughWindow = window
+                window.ignoresMouseEvents = true
+            } else if let previous = passthroughWindow {
+                previous.ignoresMouseEvents = false
+                passthroughWindow = nil
+            }
+        }
     }
 }
