@@ -23,6 +23,8 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
     private let audioStreamManager = AudioStreamManager()
     private let voiceActivityManager = VoiceActivityManager()
     private var aiProvider: (any RealtimeAIProvider) = GeminiLiveProvider()
+    private nonisolated(unsafe) var isStreamingActive: Bool = false
+    private nonisolated(unsafe) var activeAIProvider: (any RealtimeAIProvider)?
 
     private var turnResetTask: Task<Void, Never>?
 
@@ -77,6 +79,8 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
 
         // 3. Connect Realtime Provider & Audio Streams
         isSessionActive = true
+        isStreamingActive = true
+        activeAIProvider = aiProvider
         Defaults[.conversationModeEnabled] = true
         state = .listening
         captionManager.clear()
@@ -101,6 +105,8 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
         }
 
         isSessionActive = false
+        isStreamingActive = false
+        activeAIProvider = nil
         Defaults[.conversationModeEnabled] = false
         turnResetTask?.cancel()
 
@@ -181,8 +187,8 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
 
     // MARK: - AudioStreamManagerDelegate
     nonisolated public func audioStreamDidProduceMicChunk(_ data: Data) {
-        if isSessionActive {
-            aiProvider.sendAudioChunk(data)
+        if isStreamingActive {
+            activeAIProvider?.sendAudioChunk(data)
         }
     }
 

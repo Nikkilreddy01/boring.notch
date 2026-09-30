@@ -89,11 +89,7 @@ public final class GeminiLiveProvider: NSObject, RealtimeAIProvider, URLSessionW
         let message = URLSessionWebSocketTask.Message.data(jsonData)
 
         sendQueue.async {
-            task.send(message) { error in
-                if let error = error {
-                    // Send failed
-                }
-            }
+            task.send(message) { _ in }
         }
     }
 
