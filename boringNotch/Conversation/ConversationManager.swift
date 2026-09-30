@@ -173,9 +173,9 @@ public final class ConversationManager: NSObject, ObservableObject, RealtimeAIPr
             data.withUnsafeBytes { raw in
                 if let ptr = raw.bindMemory(to: Int16.self).baseAddress {
                     var sum: Float = 0
-                    let stride = max(1, sampleCount / 64)
+                    let strideStep = max(1, sampleCount / 64)
                     var count = 0
-                    for i in strideThrough(from: 0, to: sampleCount - 1, by: stride) {
+                    for i in stride(from: 0, through: sampleCount - 1, by: strideStep) {
                         let val = Float(ptr[i]) / 32768.0
                         sum += val * val
                         count += 1

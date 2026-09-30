@@ -30,20 +30,34 @@ public final class CaptionManager: ObservableObject {
 
     private init() {}
 
+    private func sanitizeText(_ text: String) -> String {
+        var result = text
+        // Strip XML / bracket tags like <no speech>, {pause}, [laughter], etc.
+        result = result.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: "\\{[^\\}]+\\}", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: "\\[[^\\]]+\\]", with: "", options: .regularExpression)
+        return result
+    }
+
     public func appendAIText(_ chunk: String) {
-        currentAIText += chunk
+        let cleaned = sanitizeText(chunk)
+        guard !cleaned.isEmpty else { return }
+        currentAIText += cleaned
     }
 
     public func setUserText(_ text: String) {
-        currentUserText = text
+        currentUserText = sanitizeText(text)
     }
 
     public func commitTurn() {
-        if !currentUserText.isEmpty {
-            turnsHistory.append(TurnItem(role: .user, text: currentUserText))
+        let cleanUser = currentUserText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanAI = currentAIText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !cleanUser.isEmpty {
+            turnsHistory.append(TurnItem(role: .user, text: cleanUser))
         }
-        if !currentAIText.isEmpty {
-            turnsHistory.append(TurnItem(role: .assistant, text: currentAIText))
+        if !cleanAI.isEmpty {
+            turnsHistory.append(TurnItem(role: .assistant, text: cleanAI))
         }
 
         // Keep last 15 items in history

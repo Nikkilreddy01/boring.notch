@@ -37,8 +37,15 @@ struct ContentView: View {
 
     @Default(.showNotHumanFace) var showNotHumanFace
 
+    private var isFloatingBarActive: Bool {
+        vm.notchState == .closed && !vm.hideOnClosed && (
+            (Defaults[.minimalLyricsMode] && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled) ||
+            (Defaults[.conversationModeEnabled] && (ConversationManager.shared.state.isConversing || !CaptionManager.shared.currentAIText.isEmpty || !CaptionManager.shared.currentUserText.isEmpty))
+        )
+    }
+
     private var isMinimalLyricsActive: Bool {
-        Defaults[.minimalLyricsMode] && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
+        isFloatingBarActive
     }
 
     private var isConversationActiveInClosedNotch: Bool {
@@ -73,17 +80,13 @@ struct ContentView: View {
             && vm.notchState == .closed && Defaults[.showPowerStatusNotifications]
         {
             chinWidth = 640
-        } else if isConversationActiveInClosedNotch && (ConversationManager.shared.state.isConversing || !CaptionManager.shared.currentAIText.isEmpty) {
+        } else if isFloatingBarActive {
             chinWidth = 390
         } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music)
             && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle)
             && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
         {
-            if Defaults[.minimalLyricsMode] {
-                chinWidth = 390
-            } else {
-                chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
-            }
+            chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
         } else if !coordinator.expandingView.show && vm.notchState == .closed
             && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace]
             && !vm.hideOnClosed
@@ -322,17 +325,12 @@ struct ContentView: View {
                       } else if coordinator.sneakPeek.show && Defaults[.inlineHUD] && (coordinator.sneakPeek.type != .music) && (coordinator.sneakPeek.type != .battery) && vm.notchState == .closed {
                           InlineHUD(type: $coordinator.sneakPeek.type, value: $coordinator.sneakPeek.value, icon: $coordinator.sneakPeek.icon, hoverAnimation: $isHovering, gestureProgress: $gestureProgress)
                               .transition(.opacity)
-                      } else if isConversationActiveInClosedNotch && (ConversationManager.shared.state.isConversing || !CaptionManager.shared.currentAIText.isEmpty || (!musicManager.isPlaying && musicManager.isPlayerIdle)) {
-                          ConversationClosedNotchView()
+                      } else if isFloatingBarActive {
+                          MinimalLyricsView()
                               .frame(alignment: .center)
                       } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music) && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed {
-                          if Defaults[.minimalLyricsMode] {
-                              MinimalLyricsView()
-                                  .frame(alignment: .center)
-                          } else {
-                              MusicLiveActivity()
-                                  .frame(alignment: .center)
-                          }
+                          MusicLiveActivity()
+                              .frame(alignment: .center)
                       } else if !coordinator.expandingView.show && vm.notchState == .closed && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace] && !vm.hideOnClosed  {
                           BoringFaceAnimation()
                        } else if vm.notchState == .open {

@@ -10,6 +10,8 @@ import SwiftUI
 
 struct MinimalLyricsView: View {
     @ObservedObject var musicManager = MusicManager.shared
+    @ObservedObject var conversationManager = ConversationManager.shared
+    @ObservedObject var captionManager = CaptionManager.shared
     @EnvironmentObject var vm: BoringViewModel
 
     @State private var isExpanded: Bool = false
@@ -21,7 +23,19 @@ struct MinimalLyricsView: View {
     @State private var isDismissed = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var isVisible: Bool { isExpanded && !isTimedOut && !isDismissed }
+    private var isConversationActive: Bool {
+        Defaults[.conversationModeEnabled] && (conversationManager.state.isConversing || !captionManager.currentAIText.isEmpty || !captionManager.currentUserText.isEmpty)
+    }
+
+    private var isMusicActive: Bool {
+        Defaults[.minimalLyricsMode] && (musicManager.isPlaying || !musicManager.isPlayerIdle)
+    }
+
+    private var isVisible: Bool {
+        if isConversationActive { return true }
+        return isExpanded && !isTimedOut && !isDismissed
+    }
+
     private var motion: Animation {
         reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.48, dampingFraction: 0.82)
     }
@@ -40,7 +54,7 @@ struct MinimalLyricsView: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.1, paused: !musicManager.isPlaying)) { timeline in
+        TimelineView(.animation(minimumInterval: 0.1, paused: !musicManager.isPlaying && !isConversationActive)) { timeline in
             lyricsBody(at: timeline.date)
         }
     }
@@ -70,19 +84,41 @@ struct MinimalLyricsView: View {
         }()
 
         let displayCurrent = resolvedCurrent.isEmpty ? musicManager.songTitle : resolvedCurrent
-        let isLongCurrent = displayCurrent.count > 34
+        let isLongCurrent = isConversationActive ? true : (displayCurrent.count > 34)
         let barHeight: CGFloat = isLongCurrent ? 52 : 46
         let cornerRadius: CGFloat = isLongCurrent ? 20 : 23
 
         VStack(alignment: .center, spacing: 0) {
             // 1. Untouched Physical Camera Notch Area (Standard Black Mask)
             if notchHeight > 0 {
-                NotchShape(
-                    topCornerRadius: cornerRadiusInsets.closed.top,
-                    bottomCornerRadius: cornerRadiusInsets.closed.bottom
-                )
-                .fill(Color.black)
-                .frame(width: vm.closedNotchSize.width, height: notchHeight)
+                ZStack {
+                    NotchShape(
+                        topCornerRadius: cornerRadiusInsets.closed.top,
+                        bottomCornerRadius: cornerRadiusInsets.closed.bottom
+                    )
+                    .fill(Color.black)
+                    .frame(width: vm.closedNotchSize.width, height: notchHeight)
+
+                    // Wings outside the camera
+                    HStack {
+                        if musicManager.isPlaying {
+                            Image(nsImage: musicManager.albumArt)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 14, height: 14)
+                                .clipShape(Circle())
+                                .padding(.leading, 8)
+                        }
+                        Spacer()
+                        if Defaults[.conversationModeEnabled] {
+                            Image(systemName: conversationManager.state.systemIcon)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(conversationManager.isSessionActive ? .cyan : .gray)
+                                .padding(.trailing, 8)
+                        }
+                    }
+                    .frame(width: vm.closedNotchSize.width, height: notchHeight)
+                }
                 .zIndex(1)
             }
 
@@ -90,109 +126,182 @@ struct MinimalLyricsView: View {
             Color.clear
                 .frame(width: targetWidth, height: (notchHeight > 0 ? 8 : 12))
 
-            // 3. Separate Floating Liquid Glass Bar Below the Notch
+            // 3. Separate Floating Liquid Glass Bar Below the Notch (Unobstructed by camera!)
             ZStack {
-                HStack(spacing: 12) {
-                    // LEFT: Album Artwork (Circular with subtle border & shadow)
-                    albumArtView
+                if isConversationActive {
+                    // CONVERSATION VIEW (Active Voice Partner)
+                    HStack(spacing: 10) {
+                        conversationOrbView
 
-                    // CENTER: Current + Next Lyrics (Vertical Flow Transition)
-                    lyricContentView(displayCurrent: displayCurrent, next: resolvedNext, lyricIndex: lyricIndex, isLongCurrent: isLongCurrent)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        conversationCaptionView
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // RIGHT: Existing Music Indicator with Adaptive Artwork Accent
-                    rightIndicatorView
+                        conversationActionPill
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(width: targetWidth, height: barHeight)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                } else {
+                    // MINIMAL LYRICS VIEW
+                    HStack(spacing: 12) {
+                        albumArtView
+
+                        lyricContentView(displayCurrent: displayCurrent, next: resolvedNext, lyricIndex: lyricIndex, isLongCurrent: isLongCurrent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        rightIndicatorView
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(width: targetWidth, height: barHeight)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
-                .padding(.horizontal, 14)
-                .frame(width: targetWidth, height: barHeight)
-                .background(
-                    liquidGlassBackground(cornerRadius: cornerRadius)
-                )
-                .shadow(color: Color.black.opacity(0.28), radius: 14, x: 0, y: 7)
-                .shadow(color: Color.black.opacity(0.15), radius: 3, x: 0, y: 1)
-                .scaleEffect(x: isVisible || reduceMotion ? 1 : 0.28, y: isVisible || reduceMotion ? 1 : 0.08, anchor: .top)
-                .offset(y: reduceMotion ? 0 : (isVisible ? dragOffset : -(notchHeight > 0 ? 24 : 12)))
-                .opacity(isVisible && !isPointerInside ? 1 : 0)
-                .animation(motion, value: isVisible)
-                .animation(.easeInOut(duration: 0.18), value: isPointerInside)
-                .background {
-                    LyricsPointerRegion(visible: isVisible, onHover: { isPointerInside = $0 })
-                }
-                .panGesture(direction: .up) { translation, phase in
-                    guard isVisible else { return }
-                    if phase == .ended {
-                        withAnimation(motion) { dragOffset = 0 }
-                    } else {
-                        dragOffset = -min(translation, 24)
-                        if translation > 18 {
-                            withAnimation(motion) {
+            }
+            .frame(width: targetWidth, height: barHeight)
+            .background(
+                liquidGlassBackground(cornerRadius: cornerRadius)
+            )
+            .shadow(color: Color.black.opacity(0.28), radius: 14, x: 0, y: 7)
+            .shadow(color: Color.black.opacity(0.15), radius: 3, x: 0, y: 1)
+            .scaleEffect(x: isVisible || reduceMotion ? 1 : 0.28, y: isVisible || reduceMotion ? 1 : 0.08, anchor: .top)
+            .offset(y: reduceMotion ? 0 : (isVisible ? dragOffset : -(notchHeight > 0 ? 24 : 12)))
+            .opacity(isVisible && !isPointerInside ? 1 : 0)
+            .animation(motion, value: isVisible)
+            .animation(.easeInOut(duration: 0.2), value: isConversationActive)
+            .animation(.easeInOut(duration: 0.18), value: isPointerInside)
+            .background {
+                LyricsPointerRegion(visible: isVisible, onHover: { isPointerInside = $0 })
+            }
+            .gesture(
+                DragGesture(minimumDistance: 8, coordinateSpace: .global)
+                    .onChanged { value in
+                        if value.translation.height < 0 {
+                            dragOffset = value.translation.height * 0.4
+                        }
+                    }
+                    .onEnded { value in
+                        if value.translation.height < -14 || value.predictedEndTranslation.height < -25 {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                 isDismissed = true
+                            }
+                        } else {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                                 dragOffset = 0
                             }
                         }
                     }
-                }
-
-            }
+            )
         }
         .frame(width: targetWidth, alignment: .top)
-        .animation(.spring(response: 0.45, dampingFraction: 0.88), value: isExpanded)
-        .animation(.spring(response: 0.45, dampingFraction: 0.88), value: isTimedOut)
-        .animation(.spring(response: 0.38, dampingFraction: 0.85), value: barHeight)
         .onAppear {
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) {
+            if musicManager.isPlaying {
                 isExpanded = true
             }
-            handlePlaybackChange(isPlaying: musicManager.isPlaying)
         }
-        .onDisappear {
-            pauseInactivityTask?.cancel()
-        }
-        .onChange(of: musicManager.songTitle) { _, _ in
-            withAnimation(motion) { isDismissed = false }
-        }
-        .onChange(of: musicManager.artistName) { _, _ in
-            withAnimation(motion) { isDismissed = false }
-        }
-        .onChange(of: musicManager.isPlaying) { _, isPlaying in
-            handlePlaybackChange(isPlaying: isPlaying)
+        .onChange(of: musicManager.isPlaying) { _, playing in
+            handlePlaybackChange(isPlaying: playing)
         }
     }
 
-    // MARK: - Native macOS Liquid Glass Background (Matching Control Center)
-    @ViewBuilder
+    // MARK: - Conversation Subviews
+    private var conversationOrbView: some View {
+        ZStack {
+            Circle()
+                .fill(orbColor.opacity(0.2))
+                .frame(width: 28, height: 28)
+                .scaleEffect(1.0 + CGFloat(conversationManager.audioLevel) * 0.3)
+
+            Circle()
+                .fill(orbColor)
+                .frame(width: 18, height: 18)
+                .overlay {
+                    Image(systemName: conversationManager.state.systemIcon)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white)
+                }
+        }
+        .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.7), value: conversationManager.audioLevel)
+    }
+
+    private var orbColor: Color {
+        switch conversationManager.state {
+        case .listening:
+            return .cyan
+        case .userSpeaking:
+            return .green
+        case .thinking:
+            return .orange
+        case .assistantSpeaking:
+            return .purple
+        case .error:
+            return .red
+        default:
+            return .gray
+        }
+    }
+
+    private var conversationCaptionView: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if conversationManager.state == .assistantSpeaking || !captionManager.currentAIText.isEmpty {
+                HStack(spacing: 4) {
+                    Text("🤖")
+                        .font(.system(size: 11))
+                    Text(captionManager.currentAIText)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .transition(.opacity)
+            } else if conversationManager.state == .userSpeaking || !captionManager.currentUserText.isEmpty {
+                HStack(spacing: 4) {
+                    Text("🎙️")
+                        .font(.system(size: 11))
+                    Text(captionManager.currentUserText.isEmpty ? "Listening to you…" : captionManager.currentUserText)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.95))
+                        .lineLimit(2)
+                }
+                .transition(.opacity)
+            } else {
+                Text(conversationManager.state.statusDescription)
+                    .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.75))
+            }
+        }
+        .animation(.smooth(duration: 0.2), value: captionManager.currentAIText)
+    }
+
+    private var conversationActionPill: some View {
+        Button(action: {
+            if conversationManager.state == .assistantSpeaking {
+                conversationManager.interruptAssistant()
+            } else {
+                conversationManager.toggleConversationMode()
+            }
+        }) {
+            Image(systemName: conversationManager.state == .assistantSpeaking ? "hand.raised.fill" : conversationManager.state.systemIcon)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.white.opacity(0.18)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Liquid Glass Substrate
     private func liquidGlassBackground(cornerRadius: CGFloat) -> some View {
         ZStack {
-            // 1. Native macOS Blur Material
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(.ultraThinMaterial)
 
-            // 2. Dark Translucent Substrate (Deep contrast, native macOS feel)
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(Color.black.opacity(0.36))
 
-            // 3. Top Specular Reflection Highlight
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        stops: [
-                            .init(color: Color.white.opacity(0.14), location: 0.0),
-                            .init(color: Color.white.opacity(0.02), location: 0.35),
-                            .init(color: Color.clear, location: 1.0)
-                        ],
-                        startPoint: .top,
-                        endPoint: .center
-                    )
-                )
-
-            // 4. Specular Hairline Perimeter Stroke
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(
                     LinearGradient(
                         stops: [
-                            .init(color: Color.white.opacity(0.40), location: 0.0),
-                            .init(color: Color.white.opacity(0.16), location: 0.3),
-                            .init(color: Color.white.opacity(0.04), location: 0.7),
+                            .init(color: Color.white.opacity(0.28), location: 0.0),
                             .init(color: Color.white.opacity(0.12), location: 1.0)
                         ],
                         startPoint: .top,
@@ -215,7 +324,6 @@ struct MinimalLyricsView: View {
                 isExpanded = true
             }
         } else {
-            // 12-second playback-inactivity timer when paused
             pauseInactivityTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(12))
                 guard !Task.isCancelled else { return }
@@ -258,7 +366,7 @@ struct MinimalLyricsView: View {
             }
     }
 
-    // MARK: - Lyric Content View (Current + Next, Vertical Flow Transition)
+    // MARK: - Lyric Content View
     @ViewBuilder
     private func lyricContentView(displayCurrent: String, next: String, lyricIndex: Int, isLongCurrent: Bool) -> some View {
         let isPersian = displayCurrent.unicodeScalars.contains { scalar in
@@ -267,7 +375,6 @@ struct MinimalLyricsView: View {
         }
 
         VStack(alignment: .leading, spacing: 2) {
-            // CURRENT LYRIC: Larger, brighter, primary focus, up to 2 lines
             Text(displayCurrent)
                 .font(
                     isPersian
@@ -287,7 +394,6 @@ struct MinimalLyricsView: View {
                 )
                 .id("current_\(lyricIndex)_\(displayCurrent)")
 
-            // NEXT LYRIC: Smaller, subtle, underneath preview
             if !next.isEmpty {
                 Text(next)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -309,8 +415,6 @@ struct MinimalLyricsView: View {
     }
 }
 
-/// Poll the screen position so exit detection continues while the window passes clicks through.
-/// The top edge remains a grab zone so an invisible bubble can still be dragged into the notch.
 private struct LyricsPointerRegion: NSViewRepresentable {
     var visible: Bool
     var onHover: (Bool) -> Void
@@ -333,8 +437,6 @@ private struct LyricsPointerRegion: NSViewRepresentable {
         private var isCapturingDrag = false
         private weak var passthroughWindow: NSWindow?
 
-        // The fade is immediate, but keeping the window interactive briefly lets a
-        // normal upward drag begin anywhere on the bar before clicks pass through.
         private let passthroughDelay: TimeInterval = 0.6
         private let grabZoneHeight: CGFloat = 10
 
