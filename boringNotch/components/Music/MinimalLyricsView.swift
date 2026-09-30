@@ -2,26 +2,27 @@
 //  MinimalLyricsView.swift
 //  boringNotch
 //
-//  Created by opencode on 2026-09-17.
+//  Created by Antigravity on 2026-09-17.
 //
 
-import AppKit
 import Defaults
 import SwiftUI
 
 struct MinimalLyricsView: View {
-    @EnvironmentObject var vm: BoringViewModel
     @ObservedObject var musicManager = MusicManager.shared
+    @EnvironmentObject var vm: BoringViewModel
 
     @State private var isExpanded: Bool = false
-    @State private var pauseInactivityTask: Task<Void, Never>?
     @State private var isTimedOut: Bool = false
+    @State private var pauseInactivityTask: Task<Void, Never>?
 
     private let targetWidth: CGFloat = 390
 
     private var hasPhysicalNotch: Bool {
-        let screen = vm.screenUUID.flatMap { NSScreen.screen(withUUID: $0) } ?? NSScreen.main
-        return (screen?.safeAreaInsets.top ?? 0) > 0
+        guard let currentScreen = vm.screenUUID.flatMap({ NSScreen.screen(withUUID: $0) }) else {
+            return false
+        }
+        return (currentScreen.safeAreaInsets.top) > 0
     }
 
     private var notchHeight: CGFloat {
@@ -29,97 +30,133 @@ struct MinimalLyricsView: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.25)) { timeline in
-            let currentElapsed: Double = {
-                guard musicManager.isPlaying else { return musicManager.elapsedTime }
-                let delta = timeline.date.timeIntervalSince(musicManager.timestampDate)
-                let progressed = musicManager.elapsedTime + (delta * musicManager.playbackRate)
-                return min(max(progressed, 0), musicManager.songDuration)
-            }()
+        let lyricIndex = musicManager.currentLyricIndex
+        let hasLyrics = !musicManager.lyrics.isEmpty && lyricIndex >= 0 && lyricIndex < musicManager.lyrics.count
 
-            let lyricData = musicManager.currentAndNextLyric(at: currentElapsed)
-            let current = lyricData.current.trimmingCharacters(in: .whitespacesAndNewlines)
-            let next = lyricData.next.trimmingCharacters(in: .whitespacesAndNewlines)
-            let lyricIndex = lyricData.index
+        let current: String = {
+            if hasLyrics {
+                return musicManager.lyrics[lyricIndex].words
+            }
+            if musicManager.isFetchingLyrics {
+                return "Fetching lyrics…"
+            }
+            return musicManager.songTitle
+        }()
 
-            let displayCurrent: String = {
-                if musicManager.isFetchingLyrics { return "Loading lyrics…" }
-                if !current.isEmpty { return current }
-                if !musicManager.songTitle.isEmpty {
-                    return musicManager.songTitle + (musicManager.artistName.isEmpty ? "" : " • " + musicManager.artistName)
+        let next: String = {
+            if hasLyrics && (lyricIndex + 1) < musicManager.lyrics.count {
+                return musicManager.lyrics[lyricIndex + 1].words
+            }
+            if !hasLyrics && !musicManager.isFetchingLyrics {
+                return musicManager.artistName
+            }
+            return ""
+        }()
+
+        let displayCurrent = current.isEmpty ? musicManager.songTitle : current
+        let isLongCurrent = displayCurrent.count > 34
+        let barHeight: CGFloat = isLongCurrent ? 52 : 46
+        let cornerRadius: CGFloat = isLongCurrent ? 20 : 23
+
+        VStack(alignment: .center, spacing: 0) {
+            // 1. Untouched Physical Camera Notch Area (Standard Black Mask)
+            if notchHeight > 0 {
+                NotchShape(
+                    topCornerRadius: cornerRadiusInsets.closed.top,
+                    bottomCornerRadius: cornerRadiusInsets.closed.bottom
+                )
+                .fill(Color.black)
+                .frame(width: vm.closedNotchSize.width, height: notchHeight)
+            }
+
+            // 2. Clear Gap Between Physical Notch and Floating Bar
+            Color.clear
+                .frame(width: targetWidth, height: (notchHeight > 0 ? 8 : 12))
+
+            // 3. Separate Floating Liquid Glass Bar Below the Notch
+            if isExpanded && !isTimedOut {
+                HStack(spacing: 12) {
+                    // LEFT: Album Artwork (Circular with subtle border & shadow)
+                    albumArtView
+
+                    // CENTER: Current + Next Lyrics (Vertical Flow Transition)
+                    lyricContentView(displayCurrent: displayCurrent, next: next, lyricIndex: lyricIndex, isLongCurrent: isLongCurrent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // RIGHT: Existing Music Indicator with Adaptive Artwork Accent
+                    rightIndicatorView
                 }
-                return "♪ Playing"
-            }()
-
-            let isLongCurrent = displayCurrent.count > 34
-            let contentHeight: CGFloat = isLongCurrent ? 56 : 42
-            let currentWidth: CGFloat = isExpanded && !isTimedOut ? targetWidth : vm.closedNotchSize.width
-            let currentHeight: CGFloat = isExpanded && !isTimedOut ? (notchHeight + contentHeight) : vm.effectiveClosedNotchHeight
-
-            ZStack(alignment: .top) {
-                // Continuous Liquid Glass Notch Surface (Zero gap, anchored directly to top bezel)
-                NotchShape(topCornerRadius: 6, bottomCornerRadius: 16)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        NotchShape(topCornerRadius: 6, bottomCornerRadius: 16)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.55),
-                                        Color.white.opacity(0.18),
-                                        Color.white.opacity(0.04)
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                ),
-                                lineWidth: 0.75
-                            )
+                .padding(.horizontal, 14)
+                .frame(width: targetWidth, height: barHeight)
+                .background(
+                    liquidGlassBackground(cornerRadius: cornerRadius)
+                )
+                .shadow(color: Color.black.opacity(0.28), radius: 14, x: 0, y: 7)
+                .shadow(color: Color.black.opacity(0.15), radius: 3, x: 0, y: 1)
+                .transition(
+                    .asymmetric(
+                        insertion: .scale(scale: 0.94, anchor: .top).combined(with: .opacity),
+                        removal: .scale(scale: 0.94, anchor: .top).combined(with: .opacity)
                     )
-                    .shadow(color: Color.black.opacity(0.2), radius: 8, x: 0, y: 4)
-
-                // Content inside the Liquid Glass Notch
-                VStack(spacing: 0) {
-                    // Physical Camera Notch Cutout Space (untouched hardware)
-                    if notchHeight > 0 {
-                        Rectangle()
-                            .fill(Color.clear)
-                            .frame(width: vm.closedNotchSize.width - 20, height: notchHeight)
-                    }
-
-                    // Lower area: Lyrics Row directly below the camera notch
-                    if isExpanded && !isTimedOut {
-                        HStack(spacing: 12) {
-                            // LEFT: Album Artwork (Circular with subtle highlight and shadow)
-                            albumArtView
-
-                            // CENTER: Current + Next Lyrics (Vertical Flow Transition)
-                            lyricContentView(displayCurrent: displayCurrent, next: next, lyricIndex: lyricIndex)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            // RIGHT: Existing Music Indicator with Adaptive Artwork Accent
-                            rightIndicatorView
-                        }
-                        .padding(.horizontal, 16)
-                        .frame(height: contentHeight)
-                        .opacity(isExpanded && !isTimedOut ? 1 : 0)
-                        .offset(y: isExpanded && !isTimedOut ? 0 : -6)
-                        .clipped()
-                    }
-                }
+                )
             }
-            .frame(width: currentWidth, height: currentHeight)
-            .animation(.spring(response: 0.45, dampingFraction: 0.88), value: isExpanded)
-            .animation(.spring(response: 0.45, dampingFraction: 0.88), value: isTimedOut)
-            .animation(.spring(response: 0.38, dampingFraction: 0.85), value: contentHeight)
-            .onAppear {
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) {
-                    isExpanded = true
-                }
-                handlePlaybackChange(isPlaying: musicManager.isPlaying)
+        }
+        .frame(width: targetWidth, alignment: .top)
+        .animation(.spring(response: 0.45, dampingFraction: 0.88), value: isExpanded)
+        .animation(.spring(response: 0.45, dampingFraction: 0.88), value: isTimedOut)
+        .animation(.spring(response: 0.38, dampingFraction: 0.85), value: barHeight)
+        .onAppear {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) {
+                isExpanded = true
             }
-            .onChange(of: musicManager.isPlaying) { _, isPlaying in
-                handlePlaybackChange(isPlaying: isPlaying)
-            }
+            handlePlaybackChange(isPlaying: musicManager.isPlaying)
+        }
+        .onChange(of: musicManager.isPlaying) { _, isPlaying in
+            handlePlaybackChange(isPlaying: isPlaying)
+        }
+    }
+
+    // MARK: - Native macOS Liquid Glass Background (Matching Control Center)
+    @ViewBuilder
+    private func liquidGlassBackground(cornerRadius: CGFloat) -> some View {
+        ZStack {
+            // 1. Native macOS Blur Material
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(.ultraThinMaterial)
+
+            // 2. Dark Translucent Substrate (Deep contrast, native macOS feel)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color.black.opacity(0.36))
+
+            // 3. Top Specular Reflection Highlight
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        stops: [
+                            .init(color: Color.white.opacity(0.14), location: 0.0),
+                            .init(color: Color.white.opacity(0.02), location: 0.35),
+                            .init(color: Color.clear, location: 1.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
+                )
+
+            // 4. Specular Hairline Perimeter Stroke
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        stops: [
+                            .init(color: Color.white.opacity(0.40), location: 0.0),
+                            .init(color: Color.white.opacity(0.16), location: 0.3),
+                            .init(color: Color.white.opacity(0.04), location: 0.7),
+                            .init(color: Color.white.opacity(0.12), location: 1.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 0.75
+                )
         }
     }
 
@@ -153,13 +190,13 @@ struct MinimalLyricsView: View {
         Image(nsImage: musicManager.albumArt)
             .resizable()
             .aspectRatio(contentMode: .fill)
-            .frame(width: 30, height: 30)
+            .frame(width: 32, height: 32)
             .clipShape(Circle())
             .overlay(
                 Circle()
-                    .strokeBorder(Color.white.opacity(0.3), lineWidth: 0.5)
+                    .strokeBorder(Color.white.opacity(0.25), lineWidth: 0.75)
             )
-            .shadow(color: Color.black.opacity(0.2), radius: 2.5, x: 0, y: 1)
+            .shadow(color: Color.black.opacity(0.25), radius: 3, x: 0, y: 1.5)
     }
 
     // MARK: - Right Indicator (Adaptive Artwork Accent)
@@ -168,7 +205,7 @@ struct MinimalLyricsView: View {
             .fill(
                 Defaults[.coloredSpectrogram]
                     ? Color(nsColor: musicManager.avgColor).gradient
-                    : Color.white.opacity(0.85).gradient
+                    : Color.white.opacity(0.9).gradient
             )
             .frame(width: 16, height: 14)
             .mask {
@@ -179,7 +216,7 @@ struct MinimalLyricsView: View {
 
     // MARK: - Lyric Content View (Current + Next, Vertical Flow Transition)
     @ViewBuilder
-    private func lyricContentView(displayCurrent: String, next: String, lyricIndex: Int) -> some View {
+    private func lyricContentView(displayCurrent: String, next: String, lyricIndex: Int, isLongCurrent: Bool) -> some View {
         let isPersian = displayCurrent.unicodeScalars.contains { scalar in
             let v = scalar.value
             return v >= 0x0600 && v <= 0x06FF
@@ -190,18 +227,18 @@ struct MinimalLyricsView: View {
             Text(displayCurrent)
                 .font(
                     isPersian
-                        ? .custom("Vazirmatn-Regular", size: 13)
-                        : .system(size: 13, weight: .semibold, design: .rounded)
+                        ? .custom("Vazirmatn-Regular", size: 12.5)
+                        : .system(size: 12.5, weight: .semibold, design: .rounded)
                 )
-                .foregroundColor(musicManager.isFetchingLyrics ? .white.opacity(0.65) : .white)
+                .foregroundColor(musicManager.isFetchingLyrics ? .white.opacity(0.7) : .white)
                 .shadow(color: Color.black.opacity(0.35), radius: 1, x: 0, y: 0.75)
-                .lineLimit(2)
+                .lineLimit(isLongCurrent ? 2 : 1)
                 .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(.leading)
                 .transition(
                     .asymmetric(
-                        insertion: .offset(y: 12).combined(with: .opacity),
-                        removal: .offset(y: -12).combined(with: .opacity)
+                        insertion: .offset(y: 8).combined(with: .opacity),
+                        removal: .offset(y: -8).combined(with: .opacity)
                     )
                 )
                 .id("current_\(lyricIndex)_\(displayCurrent)")
@@ -209,15 +246,15 @@ struct MinimalLyricsView: View {
             // NEXT LYRIC: Smaller, subtle, underneath preview
             if !next.isEmpty {
                 Text(next)
-                    .font(.system(size: 11, weight: .regular, design: .rounded))
-                    .foregroundColor(.white.opacity(0.55))
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.65))
                     .shadow(color: Color.black.opacity(0.35), radius: 1, x: 0, y: 0.75)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .transition(
                         .asymmetric(
-                            insertion: .offset(y: 10).combined(with: .opacity),
-                            removal: .offset(y: -10).combined(with: .opacity)
+                            insertion: .offset(y: 6).combined(with: .opacity),
+                            removal: .offset(y: -6).combined(with: .opacity)
                         )
                     )
                     .id("next_\(lyricIndex)_\(next)")
